@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">Kich Launcher</string>
+    <string name="app_name">AK Launcher</string>
     <string name="set_default_launcher">Als Standard-Launcher festlegen</string>
     <string name="default_launcher_active">Standard-Launcher aktiv</string>
-    <string name="settings_label">Kich Launcher-Einstellungen</string>
+    <string name="settings_label">AK Launcher-Einstellungen</string>
 </resources>

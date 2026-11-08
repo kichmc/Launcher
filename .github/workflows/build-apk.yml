@@ -1,4 +1,4 @@
-name: Build Kich Launcher APK
+name: Build AK Launcher APK
 
 on:
   workflow_dispatch:

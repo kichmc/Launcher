@@ -2,8 +2,8 @@
 <resources>
     <string name="settings_title">Settings</string>
     <string name="settings_set_default">Set as default launcher</string>
-    <string name="settings_default_current">Kich Launcher is your default launcher</string>
-    <string name="settings_default_tap">Tap to set Kich Launcher as your home app</string>
+    <string name="settings_default_current">AK Launcher is your default launcher</string>
+    <string name="settings_default_tap">Tap to set AK Launcher as your home app</string>
     <string name="settings_gestures">Gestures</string>
     <string name="settings_show_weather">Weather in the widget</string>
     <string name="settings_weather_app">Tap on weather opens</string>
@@ -170,8 +170,8 @@
     <string name="settings_feedback_telegram_desc">Release news — t.me/ARKLauncherUpdates</string>
     <string name="settings_feedback_reddit">Reddit community</string>
     <string name="settings_feedback_reddit_desc">Posts and discussion — r/ArkLauncher</string>
-    <string name="settings_support_title">Support Kich Launcher</string>
-    <string name="settings_support_text">Kich Launcher is free and open source, and stays that way. If it makes your phone nicer, you can buy me a coffee or sponsor the work.</string>
+    <string name="settings_support_title">Support AK Launcher</string>
+    <string name="settings_support_text">AK Launcher is free and open source, and stays that way. If it makes your phone nicer, you can buy me a coffee or sponsor the work.</string>
     <string name="settings_support_github">Sponsor on GitHub</string>
     <string name="settings_support_coffee">Buy me a coffee</string>
     <string name="settings_support_paypal">PayPal</string>
@@ -206,10 +206,10 @@
     <string name="settings_motivation">Motivation</string>
     <string name="settings_motivation_open">Quotes and widget settings</string>
     <string name="settings_motivation_open_desc">Change interval, favorites and your own quotes. Add the Motivation widget from the widget picker.</string>
-    <string name="settings_about_kich">About Kich Launcher</string>
-    <string name="settings_about_name">Kich Launcher</string>
+    <string name="settings_about_kich">About AK Launcher</string>
+    <string name="settings_about_name">AK Launcher</string>
     <string name="settings_about_version">Version %1$s</string>
     <string name="settings_about_credit">Based on ARK Launcher, licensed under the Apache License 2.0.</string>
     <string name="settings_widgets">Widgets</string>
-    <string name="settings_widgets_hint">Long-press the home screen to add, move, resize or remove widgets. The Motivation widget is in the widget list under Kich Launcher.</string>
+    <string name="settings_widgets_hint">Long-press the home screen to add, move, resize or remove widgets. The Motivation widget is in the widget list under AK Launcher.</string>
 </resources>

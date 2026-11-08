@@ -2,8 +2,8 @@
 <resources>
     <string name="settings_title">Настройки</string>
     <string name="settings_set_default">Сделать лаунчером по умолчанию</string>
-    <string name="settings_default_current">Kich Launcher используется по умолчанию</string>
-    <string name="settings_default_tap">Нажмите, чтобы выбрать Kich Launcher для главного экрана</string>
+    <string name="settings_default_current">AK Launcher используется по умолчанию</string>
+    <string name="settings_default_tap">Нажмите, чтобы выбрать AK Launcher для главного экрана</string>
     <string name="settings_gestures">Жесты</string>
     <string name="settings_show_weather">Погода в виджете</string>
     <string name="settings_weather_app">Нажатие на погоду открывает</string>
@@ -176,8 +176,8 @@
     <string name="settings_feedback_telegram_desc">Новости о выпусках — t.me/ARKLauncherUpdates</string>
     <string name="settings_feedback_reddit">Сообщество в Reddit</string>
     <string name="settings_feedback_reddit_desc">Посты и обсуждение — r/ArkLauncher</string>
-    <string name="settings_support_title">Поддержать Kich Launcher</string>
-    <string name="settings_support_text">Kich Launcher бесплатен, имеет открытый исходный код и останется таким. Если он делает ваш телефон приятнее, вы можете угостить меня кофе или спонсировать работу.</string>
+    <string name="settings_support_title">Поддержать AK Launcher</string>
+    <string name="settings_support_text">AK Launcher бесплатен, имеет открытый исходный код и останется таким. Если он делает ваш телефон приятнее, вы можете угостить меня кофе или спонсировать работу.</string>
     <string name="settings_support_github">Спонсировать на GitHub</string>
     <string name="settings_support_coffee">Угостить кофе</string>
     <string name="settings_support_paypal">PayPal</string>

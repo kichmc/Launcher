@@ -2,8 +2,8 @@
 <resources>
     <string name="settings_title">Asetukset</string>
     <string name="settings_set_default">Aseta oletuslauncheriksi</string>
-    <string name="settings_default_current">Kich Launcher on oletuslauncherisi</string>
-    <string name="settings_default_tap">Napauta asettaaksesi Kich Launcherin oletukseksi</string>
+    <string name="settings_default_current">AK Launcher on oletuslauncherisi</string>
+    <string name="settings_default_tap">Napauta asettaaksesi AK Launcherin oletukseksi</string>
     <string name="settings_gestures">Eleet</string>
     <string name="settings_show_weather">Sää widgetissä</string>
     <string name="settings_weather_app">Sään napautus avaa</string>
@@ -170,8 +170,8 @@
     <string name="settings_feedback_telegram_desc">Julkaisu-uutiset — t.me/ARKLauncherUpdates</string>
     <string name="settings_feedback_reddit">Reddit-yhteisö</string>
     <string name="settings_feedback_reddit_desc">Julkaisut ja keskustelu — r/ArkLauncher</string>
-    <string name="settings_support_title">Tue Kich Launcheria</string>
-    <string name="settings_support_text">Kich Launcher on ilmainen ja avointa lähdekoodia, ja pysyy sellaisena. Jos se tekee puhelimestasi mukavamman, voit tarjota minulle kahvin tai sponsoroida työtä.</string>
+    <string name="settings_support_title">Tue AK Launcheria</string>
+    <string name="settings_support_text">AK Launcher on ilmainen ja avointa lähdekoodia, ja pysyy sellaisena. Jos se tekee puhelimestasi mukavamman, voit tarjota minulle kahvin tai sponsoroida työtä.</string>
     <string name="settings_support_github">Sponsoroi GitHubissa</string>
     <string name="settings_support_coffee">Tarjoa kahvi</string>
     <string name="settings_support_paypal">PayPal</string>

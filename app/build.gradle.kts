@@ -61,7 +61,7 @@ android {
             applicationIdSuffix = ".debug"
             // Installed beside the release build on the test phones: a distinct app-list label keeps
             // its own (separate) home screen from being taken for the release one.
-            manifestPlaceholders["appLabel"] = "Kich Launcher debug"
+            manifestPlaceholders["appLabel"] = "AK Launcher debug"
         }
         release {
             isMinifyEnabled = true

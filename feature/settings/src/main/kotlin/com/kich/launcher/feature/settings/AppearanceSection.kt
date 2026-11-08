@@ -102,7 +102,7 @@ internal fun AppearanceRows(
     }
 }
 
-/** About Kich Launcher: name, version and the upstream credit the Apache-2.0 license asks for. */
+/** About AK Launcher: name, version and the upstream credit the Apache-2.0 license asks for. */
 @Composable
 internal fun AboutRows() {
     val context = LocalContext.current

@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">Kich Launcher</string>
+    <string name="app_name">AK Launcher</string>
     <string name="set_default_launcher">Set as default launcher</string>
     <string name="default_launcher_active">Default launcher active</string>
-    <string name="settings_label">Kich Launcher settings</string>
+    <string name="settings_label">AK Launcher settings</string>
     <string name="wallpaper_title">Wallpaper</string>
     <string name="wallpaper_preview">Selected wallpaper preview</string>
     <string name="wallpaper_none">No wallpaper chosen yet. Pick an image from your device.</string>
@@ -34,11 +34,11 @@
     <string name="motivation_remove">Remove</string>
     <string name="motivation_none">Nothing here yet.</string>
     <string name="motivation_note">Add the Motivation widget from the home screen widget picker. Android refreshes widgets at most every 30 minutes, so a change can take a little while to show.</string>
-    <string name="wallpaper_launcher_set">Set for Kich Launcher only</string>
+    <string name="wallpaper_launcher_set">Set for AK Launcher only</string>
     <string name="wallpaper_launcher_remove">Remove launcher wallpaper</string>
     <string name="wallpaper_launcher_applied">Launcher wallpaper set. Your phone\'s own wallpaper was not changed.</string>
     <string name="wallpaper_launcher_removed">Launcher wallpaper removed. Your phone\'s wallpaper shows again.</string>
-    <string name="wallpaper_launcher_note">Shown only behind Kich Launcher\'s home screen. The One UI wallpaper stays as it is.</string>
+    <string name="wallpaper_launcher_note">Shown only behind AK Launcher\'s home screen. The One UI wallpaper stays as it is.</string>
     <string name="wallpaper_system_heading">Phone wallpaper (changes your One UI wallpaper)</string>
     <string name="motivation_backup_title">Backup</string>
     <string name="motivation_backup_copy">Copy my quotes</string>

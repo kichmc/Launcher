@@ -10,7 +10,7 @@
     <string name="home_full">Startskärmen är full</string>
     <string name="folder_default_name">Mapp</string>
     <string name="popup_widgets">Widgetar</string>
-    <string name="notice_work_apps_need_default">Ange Kich Launcher som startskärmsapp för att kunna pausa jobbappar.</string>
+    <string name="notice_work_apps_need_default">Ange AK Launcher som startskärmsapp för att kunna pausa jobbappar.</string>
     <string name="edit_title">Redigera</string>
     <string name="edit_icon_hint">Tryck på ikonen för att byta den</string>
     <string name="edit_swipe_up">Svep uppåt öppnar</string>
