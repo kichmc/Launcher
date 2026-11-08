@@ -1,0 +1,101 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- One-row layout: quote on the left, small round buttons on the right. -->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent">
+
+    <ImageView
+        android:id="@+id/bg_fill"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:importantForAccessibility="no"
+        android:scaleType="fitXY"
+        android:src="@drawable/widget_motivation_fill_soft" />
+
+    <ImageView
+        android:id="@+id/bg_glow"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:importantForAccessibility="no"
+        android:scaleType="fitXY"
+        android:src="@drawable/widget_motivation_glow_soft" />
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingStart="16dp"
+        android:paddingTop="8dp"
+        android:paddingEnd="8dp"
+        android:paddingBottom="8dp">
+
+        <FrameLayout
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1">
+
+            <TextView
+                android:id="@+id/quote_text"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:ellipsize="end"
+                android:fontFamily="serif"
+                android:gravity="center_vertical"
+                android:lineSpacingMultiplier="1.1"
+                android:paddingEnd="6dp"
+                android:textColor="#FFFFFFFF"
+                android:textSize="14sp"
+                android:textStyle="italic" />
+
+            <TextView
+                android:id="@+id/quote_sans"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:ellipsize="end"
+                android:fontFamily="sans-serif-medium"
+                android:gravity="center_vertical"
+                android:lineSpacingMultiplier="1.1"
+                android:paddingEnd="6dp"
+                android:textColor="#FFFFFFFF"
+                android:textSize="14sp"
+                android:visibility="gone" />
+
+            <TextView
+                android:id="@+id/quote_mono"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:ellipsize="end"
+                android:fontFamily="monospace"
+                android:gravity="center_vertical"
+                android:lineSpacingMultiplier="1.1"
+                android:paddingEnd="6dp"
+                android:textColor="#FFFFFFFF"
+                android:textSize="14sp"
+                android:visibility="gone" />
+        </FrameLayout>
+
+        <TextView
+            android:id="@+id/favorite_button"
+            android:layout_width="34dp"
+            android:layout_height="34dp"
+            android:background="@drawable/widget_motivation_chip_light"
+            android:contentDescription="@string/motivation_favorite"
+            android:gravity="center"
+            android:text="&#9734;"
+            android:textColor="#FFFFFFFF"
+            android:textSize="17sp" />
+
+        <TextView
+            android:id="@+id/refresh_button"
+            android:layout_width="34dp"
+            android:layout_height="34dp"
+            android:layout_marginStart="6dp"
+            android:background="@drawable/widget_motivation_chip_light"
+            android:contentDescription="@string/motivation_new_quote"
+            android:gravity="center"
+            android:text="&#8635;"
+            android:textColor="#FFFFFFFF"
+            android:textSize="17sp" />
+    </LinearLayout>
+</FrameLayout>
