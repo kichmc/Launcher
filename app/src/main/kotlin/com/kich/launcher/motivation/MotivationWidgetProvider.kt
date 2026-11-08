@@ -51,7 +51,10 @@ class MotivationWidgetProvider : AppWidgetProvider() {
             val flags = PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
             val views = RemoteViews(context.packageName, R.layout.widget_motivation)
             views.setTextViewText(R.id.quote_text, quote)
-            views.setTextViewText(R.id.favorite_button, if (store.isFavorite(quote)) "\u2605" else "\u2606")
+            val isFav = store.isFavorite(quote)
+            views.setTextViewText(R.id.favorite_button, if (isFav) "\u2605" else "\u2606")
+            // Gold star when favorited, white outline otherwise
+            views.setTextColor(R.id.favorite_button, if (isFav) 0xFFFFC371.toInt() else 0xFFFFFFFF.toInt())
             views.setOnClickPendingIntent(
                 R.id.refresh_button,
                 PendingIntent.getBroadcast(
