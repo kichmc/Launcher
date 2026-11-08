@@ -4,6 +4,7 @@ import android.app.WallpaperManager
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.ImageDecoder
 import android.net.Uri
 import java.io.File
 
@@ -43,33 +44,64 @@ class WallpaperStore(context: Context) {
         return runCatching { BitmapFactory.decodeFile(file.absolutePath) }.getOrNull()
     }
 
+    /** Why the last [saveFromUri] failed, for showing to the user; null when it succeeded. */
+    var lastError: String? = null
+        private set
+
     /**
      * Reads the picture at [uri], scaled so its long side is about [maxSide] pixels (keeps memory
      * low on small devices), stores it as the remembered selection and returns it.
+     * Uses the platform ImageDecoder (handles JPEG, PNG, WebP, HEIC, EXIF rotation, one-shot
+     * streams) and falls back to BitmapFactory.
      */
     fun saveFromUri(uri: Uri, maxSide: Int): Bitmap? {
+        lastError = null
+        val bitmap = decodeWithImageDecoder(uri, maxSide) ?: decodeWithBitmapFactory(uri, maxSide)
+        if (bitmap == null) {
+            if (lastError == null) lastError = "unsupported or unreadable image"
+            return null
+        }
+        return runCatching {
+            file.outputStream().use { bitmap.compress(Bitmap.CompressFormat.JPEG, 92, it) }
+            prefs.edit().remove(KEY_APPLIED_AT).apply()
+            bitmap
+        }.getOrElse {
+            lastError = "could not save a copy: ${it.javaClass.simpleName}"
+            null
+        }
+    }
+
+    private fun decodeWithImageDecoder(uri: Uri, maxSide: Int): Bitmap? = try {
+        val source = ImageDecoder.createSource(appContext.contentResolver, uri)
+        ImageDecoder.decodeBitmap(source) { decoder, info, _ ->
+            decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
+            val longSide = maxOf(info.size.width, info.size.height)
+            if (longSide > maxSide) {
+                val ratio = maxSide.toFloat() / longSide
+                decoder.setTargetSize(
+                    maxOf(1, (info.size.width * ratio).toInt()),
+                    maxOf(1, (info.size.height * ratio).toInt()),
+                )
+            }
+        }
+    } catch (t: Throwable) {
+        lastError = "${t.javaClass.simpleName}: ${t.message.orEmpty().take(80)}"
+        null
+    }
+
+    private fun decodeWithBitmapFactory(uri: Uri, maxSide: Int): Bitmap? = try {
         val resolver = appContext.contentResolver
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-        resolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, bounds) } ?: return null
-        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
-
+        resolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, bounds) }
         var sample = 1
         val longSide = maxOf(bounds.outWidth, bounds.outHeight)
-        while (longSide / (sample * 2) >= maxSide) sample *= 2
-        val decoded = resolver.openInputStream(uri)?.use {
+        while (longSide > 0 && longSide / (sample * 2) >= maxSide) sample *= 2
+        resolver.openInputStream(uri)?.use {
             BitmapFactory.decodeStream(it, null, BitmapFactory.Options().apply { inSampleSize = sample })
-        } ?: return null
-
-        val scaled = if (maxOf(decoded.width, decoded.height) > maxSide * 3 / 2) {
-            val ratio = maxSide.toFloat() / maxOf(decoded.width, decoded.height)
-            Bitmap.createScaledBitmap(decoded, (decoded.width * ratio).toInt(), (decoded.height * ratio).toInt(), true)
-                .also { if (it !== decoded) decoded.recycle() }
-        } else {
-            decoded
         }
-        file.outputStream().use { scaled.compress(Bitmap.CompressFormat.JPEG, 92, it) }
-        prefs.edit().remove(KEY_APPLIED_AT).apply()
-        return scaled
+    } catch (t: Throwable) {
+        lastError = "${t.javaClass.simpleName}: ${t.message.orEmpty().take(80)}"
+        null
     }
 
     /** True when the system allows apps to change the wallpaper (managed devices may forbid it). */

@@ -76,6 +76,7 @@ private fun WallpaperScreen() {
     var loaded by remember { mutableStateOf(false) }
     var status by remember { mutableStateOf<Int?>(null) }
     var busy by remember { mutableStateOf(false) }
+    var errorDetail by remember { mutableStateOf<String?>(null) }
     var target by remember { mutableStateOf(store.lastTarget) }
 
     // The remembered selection comes back on every start.
@@ -92,8 +93,10 @@ private fun WallpaperScreen() {
             if (bitmap != null) {
                 preview = bitmap
                 status = null
+                errorDetail = null
             } else {
                 status = R.string.wallpaper_error_read
+                errorDetail = store.lastError
             }
             busy = false
         }
@@ -185,6 +188,9 @@ private fun WallpaperScreen() {
 
         status?.let {
             Text(stringResource(it), style = MaterialTheme.typography.bodyMedium)
+        }
+        errorDetail?.let {
+            Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
         }
         if (store.hasApplied && status == null) {
             Text(
