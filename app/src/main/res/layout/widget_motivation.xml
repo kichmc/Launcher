@@ -16,10 +16,11 @@
         android:gravity="center_vertical"
         android:orientation="horizontal">
 
-        <View
+        <ImageView
             android:layout_width="18dp"
             android:layout_height="4dp"
-            android:background="@drawable/widget_motivation_accent" />
+            android:background="@drawable/widget_motivation_accent"
+            android:importantForAccessibility="no" />
 
         <TextView
             android:layout_width="wrap_content"
