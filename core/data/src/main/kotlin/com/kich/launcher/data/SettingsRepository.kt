@@ -81,7 +81,7 @@ class SettingsRepository @Inject constructor(
                             Keys.HOME_PAGE.name, Keys.HOME_PAGE_COUNT.name ->
                                 it.toLong().coerceIn(0L, HomeLayoutRepository.MAX_PAGES.toLong()).toInt()
                             // An ARGB colour arrives as the signed Int's Long, or its unsigned form: wrap.
-                            Keys.APP_LABEL_COLOR.name, Keys.DRAWER_BACKGROUND_COLOR.name, Keys.DRAWER_LABEL_COLOR.name -> it.toInt()
+                            Keys.APP_LABEL_COLOR.name, Keys.DRAWER_BACKGROUND_COLOR.name, Keys.DRAWER_LABEL_COLOR.name, Keys.ACCENT_COLOR.name -> it.toInt()
                             else -> it.toLong().coerceIn(Int.MIN_VALUE.toLong(), Int.MAX_VALUE.toLong()).toInt()
                         }
                     }
@@ -120,6 +120,10 @@ class SettingsRepository @Inject constructor(
             fontFamily = (p[Keys.FONT_FAMILY] ?: LauncherSettings.FONT_DEFAULT).let {
                 if (it in LauncherSettings.FONTS) it else LauncherSettings.FONT_DEFAULT
             },
+            themeMode = (p[Keys.THEME_MODE] ?: LauncherSettings.THEME_SYSTEM).let {
+                if (it in LauncherSettings.THEME_MODES) it else LauncherSettings.THEME_SYSTEM
+            },
+            accentColor = p[Keys.ACCENT_COLOR] ?: LauncherSettings.ACCENT_DEFAULT,
             infiniteScroll = p[Keys.INFINITE_SCROLL] ?: true,
             defaultReminderDismissed = p[Keys.DEFAULT_REMINDER_DISMISSED] ?: false,
             showNotificationDots = p[Keys.SHOW_NOTIF_DOTS] ?: true,
@@ -463,6 +467,8 @@ class SettingsRepository @Inject constructor(
 
     /** The launcher's font, one of [LauncherSettings.FONTS]; anything else reads back as the default. */
     suspend fun setFontFamily(font: String) = edit { it[Keys.FONT_FAMILY] = font }
+    suspend fun setThemeMode(mode: String) = edit { it[Keys.THEME_MODE] = mode }
+    suspend fun setAccentColor(argb: Int) = edit { it[Keys.ACCENT_COLOR] = argb }
     suspend fun setInfiniteScroll(value: Boolean) = edit { it[Keys.INFINITE_SCROLL] = value }
     suspend fun setShowNotificationDots(value: Boolean) = edit { it[Keys.SHOW_NOTIF_DOTS] = value }
     suspend fun setNotificationDotCount(value: Boolean) = edit { it[Keys.NOTIF_DOT_COUNT] = value }
@@ -770,6 +776,8 @@ class SettingsRepository @Inject constructor(
         val HOME_PAGE_MARKER = stringPreferencesKey("home_page_marker")
         val PAGE_SWITCH_SPEED = stringPreferencesKey("page_switch_speed")
         val FONT_FAMILY = stringPreferencesKey("font_family")
+        val THEME_MODE = stringPreferencesKey("theme_mode")
+        val ACCENT_COLOR = intPreferencesKey("accent_color")
         val INFINITE_SCROLL = booleanPreferencesKey("infinite_scroll")
         val FOLDER_SWIPE_FIRST_APP = booleanPreferencesKey("folder_swipe_first_app")
         val HIDE_HOME_APPS_FROM_DRAWER = booleanPreferencesKey("hide_home_apps_from_drawer")
@@ -871,6 +879,7 @@ class SettingsRepository @Inject constructor(
         val INT_KEYS = setOf(
             "dock_columns", "dock_bottom_spacing", "home_columns", "home_rows", "drawer_columns", "app_label_color",
             "home_page", "home_page_count", "folder_columns", "drawer_background_color", "drawer_label_color",
+            "accent_color",
         )
 
         /** Known boolean/string preference keys. importRaw writes a known key ONLY with its
@@ -891,7 +900,7 @@ class SettingsRepository @Inject constructor(
         val STRING_KEYS = setOf(
             "dock_favorites", "hidden_apps", "custom_labels", "drawer_folders",
             "notif_widget_count_style", "icon_pack_package", "left_swipe_app_key", "weather_app_key", "home_page_marker",
-            "page_switch_speed", "collapsed_settings_sections", "font_family",
+            "page_switch_speed", "collapsed_settings_sections", "font_family", "theme_mode",
             "people_privacy", "pinned_people", "people_aliases", "people_batch_times",
             "custom_icons", "folder_icons", "shortcut_icons", "swipe_up_apps",
         )

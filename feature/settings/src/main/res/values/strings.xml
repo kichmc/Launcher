@@ -195,4 +195,19 @@
     <string name="settings_wallpaper">Wallpaper</string>
     <string name="settings_wallpaper_open">Choose wallpaper</string>
     <string name="settings_wallpaper_open_desc">Pick an image and set it for the home screen, lock screen or both</string>
+    <string name="settings_appearance">Appearance</string>
+    <string name="settings_theme_mode">Theme</string>
+    <string name="settings_theme_system">System</string>
+    <string name="settings_theme_light">Light</string>
+    <string name="settings_theme_dark">Dark</string>
+    <string name="settings_accent">Accent color</string>
+    <string name="settings_accent_default">Default accent color</string>
+    <string name="settings_accent_color">Accent color</string>
+    <string name="settings_motivation">Motivation</string>
+    <string name="settings_motivation_open">Quotes and widget settings</string>
+    <string name="settings_motivation_open_desc">Change interval, favorites and your own quotes. Add the Motivation widget from the widget picker.</string>
+    <string name="settings_about_kich">About Kich Launcher</string>
+    <string name="settings_about_name">Kich Launcher</string>
+    <string name="settings_about_version">Version %1$s</string>
+    <string name="settings_about_credit">Based on ARK Launcher, licensed under the Apache License 2.0.</string>
 </resources>

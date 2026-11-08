@@ -103,6 +103,8 @@ class SettingsViewModel @Inject constructor(
     fun setDrawerLabelColor(argb: Int?) = update { repository.setDrawerLabelColor(argb) }
     fun setDrawerPictureDim(value: Float) = update { repository.setDrawerPictureDim(value) }
     fun setFontFamily(font: String) = update { repository.setFontFamily(font) }
+    fun setThemeMode(mode: String) = update { repository.setThemeMode(mode) }
+    fun setAccentColor(argb: Int) = update { repository.setAccentColor(argb) }
     fun setThemeAllIcons(value: Boolean) = update { repository.setThemeAllIcons(value) }
     fun setFolderColumns(value: Int) = update { repository.setFolderColumns(value) }
     fun setSectionCollapsed(id: String, collapsed: Boolean) = update { repository.setSettingsSectionCollapsed(id, collapsed) }

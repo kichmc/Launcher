@@ -16,4 +16,22 @@
     <string name="wallpaper_error_read">Could not read that image.</string>
     <string name="wallpaper_error_apply">Android did not accept the wallpaper change.</string>
     <string name="wallpaper_not_allowed">This device does not allow changing the wallpaper.</string>
+    <string name="motivation_title">Motivation</string>
+    <string name="motivation_widget_label">Motivation</string>
+    <string name="motivation_widget_description">Productivity quotes that change on a schedule</string>
+    <string name="motivation_favorite">Favorite quote</string>
+    <string name="motivation_new_quote">New quote</string>
+    <string name="motivation_favorited">Favorited</string>
+    <string name="motivation_interval_title">Change quote every</string>
+    <string name="motivation_interval_minutes">%1$d min</string>
+    <string name="motivation_interval_hours">%1$d h</string>
+    <string name="motivation_favorites_only">Show only my favorites</string>
+    <string name="motivation_add_title">Add your own quote</string>
+    <string name="motivation_add_hint">Your quote</string>
+    <string name="motivation_add">Add</string>
+    <string name="motivation_my_quotes">Your quotes</string>
+    <string name="motivation_my_favorites">Favorite quotes</string>
+    <string name="motivation_remove">Remove</string>
+    <string name="motivation_none">Nothing here yet.</string>
+    <string name="motivation_note">Add the Motivation widget from the home screen widget picker. Android refreshes widgets at most every 30 minutes, so a change can take a little while to show.</string>
 </resources>

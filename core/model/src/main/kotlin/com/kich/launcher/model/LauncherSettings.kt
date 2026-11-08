@@ -46,6 +46,10 @@ data class LauncherSettings(
      *  one of [FONTS], device families Android ships (a Telegram request after 0.9.9). Widgets draw
      *  their own text and keep their own fonts. */
     val fontFamily: String = FONT_DEFAULT,
+    /** Light, dark or follow the system ([THEME_MODES]). */
+    val themeMode: String = THEME_SYSTEM,
+    /** The user's accent color as ARGB, or [ACCENT_DEFAULT] (0) for the launcher's own colors. */
+    val accentColor: Int = ACCENT_DEFAULT,
     /** Swiping past the last home page continues to the first one, and back from the first to the
      *  last (unless the left-edge app takes that swipe). Off keeps the bounce back from the end. */
     val infiniteScroll: Boolean = true,
@@ -178,6 +182,12 @@ data class LauncherSettings(
 
         /** [fontFamily] choices: the system's default sans, its condensed sans, serif, monospace, the
          *  casual hand-drawn face and the cursive one -- all shipped with Android, nothing bundled. */
+        const val THEME_SYSTEM = "system"
+        const val THEME_LIGHT = "light"
+        const val THEME_DARK = "dark"
+        val THEME_MODES = listOf(THEME_SYSTEM, THEME_LIGHT, THEME_DARK)
+        const val ACCENT_DEFAULT = 0
+
         const val FONT_DEFAULT = "default"
         const val FONT_CONDENSED = "condensed"
         const val FONT_SERIF = "serif"

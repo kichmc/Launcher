@@ -587,6 +587,19 @@ fun SettingsScreen(
                 }
 
                 CollapsibleSection(
+                    title = stringResource(R.string.settings_appearance),
+                    collapsed = "appearance" in s.collapsedSettingsSections,
+                    onToggle = { viewModel.setSectionCollapsed("appearance", it) },
+                ) {
+                    AppearanceRows(
+                        themeMode = s.themeMode,
+                        accent = s.accentColor,
+                        onThemeMode = viewModel::setThemeMode,
+                        onAccent = viewModel::setAccentColor,
+                    )
+                }
+
+                CollapsibleSection(
                     title = stringResource(R.string.settings_wallpaper),
                     collapsed = "wallpaper" in s.collapsedSettingsSections,
                     onToggle = { viewModel.setSectionCollapsed("wallpaper", it) },
@@ -601,6 +614,31 @@ fun SettingsScreen(
                             )
                         }
                     }
+                }
+
+                CollapsibleSection(
+                    title = stringResource(R.string.settings_motivation),
+                    collapsed = "motivation" in s.collapsedSettingsSections,
+                    onToggle = { viewModel.setSectionCollapsed("motivation", it) },
+                ) {
+                    ExpressiveActionRow(
+                        label = stringResource(R.string.settings_motivation_open),
+                        description = stringResource(R.string.settings_motivation_open_desc),
+                    ) {
+                        runCatching {
+                            context.startActivity(
+                                Intent().setClassName(context.packageName, "com.kich.launcher.motivation.MotivationActivity"),
+                            )
+                        }
+                    }
+                }
+
+                CollapsibleSection(
+                    title = stringResource(R.string.settings_about_kich),
+                    collapsed = "about" in s.collapsedSettingsSections,
+                    onToggle = { viewModel.setSectionCollapsed("about", it) },
+                ) {
+                    AboutRows()
                 }
 
                 // Update, feedback and donation rows of the upstream project were removed in the Kich fork.
