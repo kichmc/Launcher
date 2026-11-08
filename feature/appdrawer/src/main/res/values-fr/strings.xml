@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_drawer_search_hint">Rechercher des applications</string>
+    <string name="add_to_dock">Ajouter au dock</string>
+    <string name="remove_from_dock">Retirer du dock</string>
+    <string name="add_to_home">Ajouter à l\'écran d\'accueil</string>
+    <string name="remove_from_home">Retirer de l\'écran d\'accueil</string>
+    <string name="app_info">Infos sur l\'application</string>
+    <string name="hide_app">Masquer l\'application</string>
+    <string name="rename">Modifier</string>
+    <string name="uninstall">Désinstaller</string>
+    <string name="folder_name_label">Nom du dossier</string>
+    <string name="folder_add_apps">Ajouter des applications</string>
+    <string name="folder_delete">Supprimer le dossier</string>
+    <string name="folder_remove_hint">Appuyez de manière prolongée sur une application pour la retirer du dossier</string>
+    <string name="folder_add">Ajouter</string>
+    <string name="folder_cancel">Annuler</string>
+    <string name="folder_card_empty">Dossier vide. Appuyez longuement dessus pour ajouter des applis.</string>
+    <string name="folder_delete_title">Supprimer le dossier ?</string>
+    <string name="folder_delete_text">« %1$s » sera supprimé. Ses applis resteront dans la liste.</string>
+    <string name="folder_delete_confirm">Supprimer</string>
+    <string name="folder_move_earlier">Avancer le dossier</string>
+    <string name="folder_move_later">Reculer le dossier</string>
+    <string name="folder_edit">Modifier le dossier</string>
+    <string name="folder_move_label">Déplacer le dossier</string>
+    <string name="search_section_apps">Applications</string>
+    <string name="search_section_settings">Paramètres</string>
+    <string name="search_section_contacts">Contacts</string>
+    <string name="search_calc_copied">Copié dans le presse-papiers</string>
+    <string name="search_contact_call">Appeler</string>
+    <string name="search_contact_message">Message</string>
+    <string name="drawer_frequent_apps">Les plus utilisées</string>
+    <string name="search_clear">Effacer la recherche</string>
+    <string name="search_no_results">Aucun résultat</string>
+    <string name="drawer_tab_personal">Personnel</string>
+    <string name="drawer_tab_work">Professionnel</string>
+    <string name="work_apps_pause">Mettre en pause les applis pro</string>
+    <string name="work_apps_unpause">Réactiver</string>
+    <string name="work_apps_paused_title">Les applis professionnelles sont en pause</string>
+    <string name="work_apps_paused_body">Les applis professionnelles ne peuvent pas envoyer de notifications, utiliser la batterie ni accéder à votre position.</string>
+</resources>

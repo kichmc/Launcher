@@ -1,0 +1,630 @@
+package com.kich.launcher.feature.appdrawer
+
+import android.app.Application
+import androidx.core.graphics.createBitmap
+import android.graphics.Bitmap
+import android.os.Looper
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.semantics.getOrNull
+import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.assert
+import androidx.compose.ui.test.assertCountEquals
+import androidx.compose.ui.test.getBoundsInRoot
+import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.down
+import androidx.compose.ui.test.up
+import androidx.compose.ui.test.hasSetTextAction
+import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.longClick
+import androidx.compose.ui.test.hasTestTag
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.test.onAllNodesWithTag
+import androidx.compose.ui.test.onFirst
+import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.test.onAllNodesWithContentDescription
+import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performTextClearance
+import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.test.performTouchInput
+import com.google.common.truth.Truth.assertThat
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.runBlocking
+import com.kich.launcher.model.AppItem
+import android.os.Process
+import kotlinx.coroutines.test.TestScope
+import org.junit.After
+import org.junit.Rule
+import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.RuntimeEnvironment
+import org.robolectric.Shadows.shadowOf
+import org.robolectric.annotation.Config
+import java.time.Duration
+
+/**
+ * What the drawer leaves behind when it goes: HOME takes its windows (a folder's sheet, the Edit
+ * dialog) with it, and ANY way of closing it — a pull-down, Back from an app — clears the query (and
+ * the search focus with it, so the keyboard never stays up over the home screen) so the drawer
+ * reopens fresh.
+ */
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [35], application = Application::class, qualifiers = "en")
+class AppDrawerScreenTest {
+    @get:Rule val compose = createComposeRule()
+
+    private val context: Application = RuntimeEnvironment.getApplication()
+    private val testScope = TestScope()
+    // Before the wiring: its app list is queried eagerly. Robolectric resolves a fake app's label to
+    // its package name, so the drawer shows this app as "com.mail".
+    private val mailApp = "com.mail".also { installFakeApp(context, it, "Mail") }
+    private val mapsApp = "com.maps".also { installFakeApp(context, it, "Maps") }
+    private val notesApp = "com.notes".also { installFakeApp(context, it, "Notes") }
+    private val docsApp = "com.docs".also { installFakeApp(context, it, "Docs") }
+    private val wiring = DrawerWiring(context, testScope)
+    private val viewModel = wiring.viewModel()
+    private val homeSignals = MutableSharedFlow<Boolean>(extraBufferCapacity = 1)
+    private val drawerOpen = mutableStateOf(true)
+
+    @After fun tearDown() {
+        wiring.clear(viewModel)
+        wiring.close()
+    }
+
+    private fun show() {
+        compose.setContent {
+            AppDrawerScreen(
+                onClose = {},
+                onOpenSettings = {},
+                homeSignals = homeSignals,
+                drawerOpen = drawerOpen.value,
+                viewModel = viewModel,
+            )
+        }
+        settle()
+    }
+
+    private fun settle() {
+        repeat(5) {
+            shadowOf(Looper.getMainLooper()).idle()
+            compose.waitForIdle()
+        }
+    }
+
+    /** The ViewModel's stores (Room, DataStore) and the search (Dispatchers.Default) answer from
+     *  their own threads: waits, bounded, for [text] to be on screen instead of assuming a fixed
+     *  number of idle rounds is enough. */
+    private fun awaitText(text: String, unmerged: Boolean = false) {
+        val deadline = System.currentTimeMillis() + 10_000
+        while (compose.onAllNodesWithText(text, useUnmergedTree = unmerged).fetchSemanticsNodes().isEmpty()) {
+            check(System.currentTimeMillis() < deadline) { "Timed out waiting for '$text'" }
+            Thread.sleep(20)
+            shadowOf(Looper.getMainLooper()).idle()
+            compose.waitForIdle()
+        }
+    }
+
+    private fun addApps() = context.getString(R.string.folder_add_apps)
+
+    private fun showWithFolder(name: String = "Tools") {
+        runBlocking { wiring.settingsRepository.createDrawerFolder(name) }
+        show()
+        awaitText(name)
+    }
+
+    /** A tap shows the folder's apps in a card by its icon — nothing on it changes the folder. */
+    @Test fun aTapShowsTheFolderWithoutItsEditor() {
+        showWithFolder()
+        compose.onNodeWithText("Tools").performClick()
+        settle()
+
+        compose.onNodeWithTag(DRAWER_FOLDER_CARD_TAG).assertExists()
+        compose.onNodeWithText(addApps()).assertDoesNotExist()
+    }
+
+    /** The editor (name, members, Add apps, Delete) is a long-press away, never a tap. */
+    @Test fun aLongPressOpensTheFolderEditor() {
+        showWithFolder()
+        compose.onNodeWithText("Tools").performTouchInput { longClick() }
+        settle()
+
+        compose.onNodeWithText(addApps()).assertExists()
+        compose.onNodeWithTag(DRAWER_FOLDER_CARD_TAG).assertDoesNotExist()
+    }
+
+    @Test fun homeTakesTheFolderCardWithTheDrawer() {
+        showWithFolder()
+        compose.onNodeWithText("Tools").performClick()
+        settle()
+        compose.onNodeWithTag(DRAWER_FOLDER_CARD_TAG).assertExists()
+
+        compose.runOnIdle { homeSignals.tryEmit(true) }
+        settle()
+
+        compose.onNodeWithTag(DRAWER_FOLDER_CARD_TAG).assertDoesNotExist()
+    }
+
+    /** The editor's Delete asks first: the folder stays until the question's own Delete. */
+    @Test fun deletingAFolderAsksFirst() {
+        showWithFolder()
+        compose.onNodeWithText("Tools").performTouchInput { longClick() }
+        settle()
+        compose.onNodeWithText(context.getString(R.string.folder_delete)).performClick()
+        settle()
+
+        compose.onNodeWithText(context.getString(R.string.folder_delete_title)).assertExists()
+        assertThat(viewModel.uiState.value.folders.map { it.name }).containsExactly("Tools")
+        compose.onNodeWithText(context.getString(R.string.folder_delete_confirm)).performClick()
+        awaitState("the folder is gone") { it.folders.isEmpty() }
+    }
+
+    /** The long-press is the only way to the editor, so TalkBack must say what it does. */
+    @Test fun theFolderTileTellsTalkBackWhatALongPressDoes() {
+        showWithFolder()
+        val editFolder = context.getString(R.string.folder_edit)
+
+        compose.onNodeWithText("Tools").assert(
+            SemanticsMatcher("long-press labelled '$editFolder'") {
+                it.config.getOrNull(SemanticsActions.OnLongClick)?.label == editFolder
+            },
+        )
+    }
+
+    /** The setting sorts the folders by name, case aside; off, they keep the user's order. */
+    @Test fun foldersSortByNameWhenTheSettingIsOn() {
+        runBlocking {
+            wiring.settingsRepository.createDrawerFolder("Tools")
+            wiring.settingsRepository.createDrawerFolder("games")
+        }
+        show()
+        awaitState("both folders are listed") { it.folders.size == 2 }
+        assertThat(viewModel.uiState.value.folders.map { it.name }).containsExactly("Tools", "games").inOrder()
+
+        runBlocking { wiring.settingsRepository.setSortDrawerFolders(true) }
+        awaitState("the folders are sorted") { it.folders.map { f -> f.name } == listOf("games", "Tools") }
+    }
+
+    /** The editor moves its folder a step among the folders; the first cannot go earlier. */
+    @Test fun theEditorMovesAFolderLater() {
+        runBlocking {
+            wiring.settingsRepository.createDrawerFolder("Tools")
+            wiring.settingsRepository.createDrawerFolder("Games")
+        }
+        show()
+        awaitState("both folders are listed") { it.folders.size == 2 }
+        compose.onNodeWithText("Tools").performTouchInput { longClick() }
+        settle()
+
+        compose.onNodeWithText(context.getString(R.string.folder_move_label)).assertExists()
+        compose.onNodeWithContentDescription(context.getString(R.string.folder_move_earlier)).assertIsNotEnabled()
+        compose.onNodeWithContentDescription(context.getString(R.string.folder_move_later)).performClick()
+
+        awaitState("Tools follows Games") { it.folders.map { f -> f.name } == listOf("Games", "Tools") }
+        settle()
+        compose.onNodeWithContentDescription(context.getString(R.string.folder_move_later)).assertIsNotEnabled()
+    }
+
+    /** One folder has nowhere to go: no move row at all. */
+    @Test fun theEditorOffersNoMovesForASingleFolder() {
+        showWithFolder()
+        compose.onNodeWithText("Tools").performTouchInput { longClick() }
+        settle()
+
+        compose.onNodeWithText(addApps()).assertExists()
+        compose.onNodeWithText(context.getString(R.string.folder_move_label)).assertDoesNotExist()
+        compose.onNodeWithContentDescription(context.getString(R.string.folder_move_later)).assertDoesNotExist()
+    }
+
+    /** Sorted A-Z the order is not the user's to change, so the editor offers no moves. */
+    @Test fun theEditorHidesMovesWhileFoldersSortByName() {
+        runBlocking { wiring.settingsRepository.setSortDrawerFolders(true) }
+        showWithFolder()
+        awaitState("the setting reached the drawer") { it.sortDrawerFolders }
+        compose.onNodeWithText("Tools").performTouchInput { longClick() }
+        settle()
+
+        compose.onNodeWithText(addApps()).assertExists()
+        compose.onNodeWithContentDescription(context.getString(R.string.folder_move_later)).assertDoesNotExist()
+    }
+
+    /** Issue #22: off, the folders lead the grid; on, a folder takes its place among the apps by name. */
+    @Test fun foldersSitAmongTheAppsByNameWhenMixingIsOn() {
+        runBlocking {
+            wiring.settingsRepository.createDrawerFolder("Tools")
+            wiring.settingsRepository.createDrawerFolder("games")
+        }
+        show()
+        awaitState("both folders are listed") { it.folders.size == 2 }
+        awaitText(mailApp)
+        assertThat(orderOf("Tools")).isLessThan(orderOf("games"))
+        assertThat(orderOf("games")).isLessThan(orderOf(mailApp))
+
+        runBlocking { wiring.settingsRepository.setMixDrawerFolders(true) }
+        awaitState("the setting reached the drawer") { it.mixDrawerFolders }
+        settle()
+        assertThat(orderOf(mailApp)).isLessThan(orderOf("games"))
+        assertThat(orderOf("games")).isLessThan(orderOf("Tools"))
+    }
+
+    /** The tile labelled [text] in the grid's reading order: row first (its top), then column (its left). */
+    private fun orderOf(text: String): Float =
+        compose.onNodeWithText(text).getBoundsInRoot().let { it.top.value * 10_000f + it.left.value }
+
+    private fun topOf(text: String): Float = compose.onNodeWithText(text).getBoundsInRoot().top.value
+
+    /** A Telegram request: the drawer's folder card has as many columns as the folder columns setting. */
+    @Test fun theFolderCardFollowsTheFolderColumnsSetting() {
+        val members = listOf(mailApp, mapsApp, notesApp, docsApp)
+        val id = runBlocking { wiring.settingsRepository.createDrawerFolder("Tools") }
+        show()
+        awaitState("the apps are listed") { s -> members.all { p -> s.apps.any { it.packageName == p } } }
+        val keys = viewModel.uiState.value.apps.filter { it.packageName in members }.map { it.key }
+        runBlocking { wiring.settingsRepository.addAppsToDrawerFolder(id, keys) }
+        awaitState("the folder holds the four") { it.folders.firstOrNull()?.apps?.size == 4 }
+        settle()
+        compose.onNodeWithText("Tools").performClick()
+        settle()
+        compose.onNodeWithTag(DRAWER_FOLDER_CARD_TAG).assertExists()
+        // Four members A-Z: com.docs, com.mail, com.maps, com.notes fill one row of four.
+        assertThat(topOf(notesApp)).isEqualTo(topOf(mailApp))
+
+        runBlocking { wiring.settingsRepository.setFolderColumns(3) }
+        awaitState("the setting reached the drawer") { it.folderColumns == 3 }
+        settle()
+        assertThat(topOf(notesApp)).isGreaterThan(topOf(mailApp))
+    }
+
+    /** Mixed among the apps the order is by name, so the editor offers no moves. */
+    @Test fun theEditorHidesMovesWhileFoldersMixWithTheApps() {
+        runBlocking { wiring.settingsRepository.setMixDrawerFolders(true) }
+        showWithFolder()
+        awaitState("the setting reached the drawer") { it.mixDrawerFolders }
+        compose.onNodeWithText("Tools").performTouchInput { longClick() }
+        settle()
+
+        compose.onNodeWithText(addApps()).assertExists()
+        compose.onNodeWithContentDescription(context.getString(R.string.folder_move_later)).assertDoesNotExist()
+    }
+
+    /** Issue #21: the drawer's surface takes the background opacity setting; solid by default. */
+    @Test fun theDrawerSurfaceFollowsTheBackgroundOpacitySetting() {
+        show()
+        awaitState("the default opacity") { it.backgroundOpacity == 1f }
+
+        runBlocking { wiring.settingsRepository.setDrawerBackgroundOpacity(0.6f) }
+        awaitState("the chosen opacity") { it.backgroundOpacity == 0.6f }
+    }
+
+    /** A Telegram request after 0.9.9: the drawer's surface takes the background colour setting; the theme's by default,
+     *  and the theme's again once the colour is cleared. */
+    @Test fun theDrawerSurfaceFollowsTheBackgroundColourSetting() {
+        show()
+        awaitState("the theme's colour") { it.backgroundColor == null }
+
+        runBlocking { wiring.settingsRepository.setDrawerBackgroundColor(0xFF42A5F5.toInt()) }
+        awaitState("the chosen colour") { it.backgroundColor == 0xFF42A5F5.toInt() }
+
+        runBlocking { wiring.settingsRepository.setDrawerBackgroundColor(null) }
+        awaitState("the theme's colour again") { it.backgroundColor == null }
+    }
+
+    /** The owner's 1.0.1 ask: the drawer's labels take the chosen colour; automatic (black or white by what the drawer
+     *  looks like) by default, and automatic again once the colour is cleared. */
+    @Test fun theDrawerLabelsFollowTheLabelColourSetting() {
+        show()
+        awaitState("automatic") { it.labelColor == null }
+
+        runBlocking { wiring.settingsRepository.setDrawerLabelColor(0xFF42A5F5.toInt()) }
+        awaitState("the chosen colour") { it.labelColor == 0xFF42A5F5.toInt() }
+
+        runBlocking { wiring.settingsRepository.setDrawerLabelColor(null) }
+        awaitState("automatic again") { it.labelColor == null }
+    }
+
+    /** A Telegram request after 0.9.9: the user's own picture reaches the drawer with its lightness, and is drawn under
+     *  the surface; removed, the drawer is back to the system wallpaper. */
+    @Test fun theDrawerShowsTheUsersOwnPictureWhileOneIsSet() {
+        show()
+        awaitState("no picture") { it.wallpaper == null }
+        compose.onNodeWithTag(DRAWER_WALLPAPER_TAG).assertDoesNotExist()
+
+        val dark = createBitmap(8, 8, Bitmap.Config.ARGB_8888).apply { eraseColor(android.graphics.Color.BLACK) }
+        runBlocking { wiring.drawerWallpaper.set(dark) }
+        awaitState("the picture") { it.wallpaper != null && it.wallpaper!!.luminance < 0.05f }
+        compose.onNodeWithTag(DRAWER_WALLPAPER_TAG).assertExists()
+
+        runBlocking { wiring.drawerWallpaper.clear() }
+        awaitState("no picture again") { it.wallpaper == null }
+        compose.onNodeWithTag(DRAWER_WALLPAPER_TAG).assertDoesNotExist()
+    }
+
+    /** The owner's 1.0.0 note: the dim over the user's own picture reaches the drawer; none out of the box. */
+    @Test fun theDrawerCarriesThePictureDimSetting() {
+        show()
+        awaitState("no dim") { it.pictureDim == 0f }
+
+        runBlocking { wiring.settingsRepository.setDrawerPictureDim(0.3f) }
+        awaitState("the chosen dim") { it.pictureDim == 0.3f }
+    }
+
+    /** A Telegram request after 0.9.7: with "Hide apps that are on the home screen" on, an app placed on home
+     *  leaves the drawer's list; the search still finds it. Off (the default) it stays listed. */
+    @Test fun appsOnTheHomeScreenLeaveTheDrawerWhenTheSettingIsOn() {
+        show()
+        awaitText("com.mail")
+        val mail = AppItem("com.mail", "com.mail.Main", Process.myUserHandle(), 0L, "Mail")
+        runBlocking { wiring.homeLayoutRepository.addToHome(mail, columns = 4, rows = 6) }
+        awaitState("home knows the app") { mail.key in it.homeKeys }
+        compose.onNodeWithText("com.mail").assertExists() // the default: still listed
+
+        runBlocking { wiring.settingsRepository.setHideHomeAppsFromDrawer(true) }
+        awaitState("the app left the list") { it.apps.none { a -> a.key == mail.key } }
+        settle()
+        compose.onAllNodesWithText("com.mail").assertCountEquals(0)
+
+        viewModel.onQueryChange("mail")
+        awaitText("com.mail") // the search still finds it
+    }
+
+    /** A dock that is off shows nothing, so its apps are not "on the home screen" and stay listed. */
+    @Test fun aDockAppReturnsToTheDrawerWhenTheDockIsOff() {
+        show()
+        awaitText("com.mail")
+        val mail = AppItem("com.mail", "com.mail.Main", Process.myUserHandle(), 0L, "Mail")
+        runBlocking {
+            wiring.homeLayoutRepository.addToDock(mail)
+            wiring.settingsRepository.setHideHomeAppsFromDrawer(true)
+        }
+        awaitState("the dock app left the list") { it.apps.none { a -> a.key == mail.key } }
+
+        runBlocking { wiring.settingsRepository.setDockEnabled(false) }
+        awaitState("the dock is off, the app is back") { it.apps.any { a -> a.key == mail.key } }
+    }
+
+    /** A Telegram request after 0.9.7: the drawer's icon size is its own setting; until set it follows home's. */
+    @Test fun theDrawerIconScaleFollowsItsOwnSetting() {
+        show()
+        awaitState("the default scale") { it.iconScale == 1f }
+
+        runBlocking { wiring.settingsRepository.setIconScale(1.2f) }
+        awaitState("home's scale while the drawer's is unset") { it.iconScale == 1.2f }
+        runBlocking { wiring.settingsRepository.setDrawerIconScale(0.9f) }
+        awaitState("the drawer's own scale") { it.iconScale == 0.9f }
+    }
+
+    /** Issue #17: with "Show folder names" off the drawer's folder tiles carry no name. */
+    @Test fun theFolderTileHidesItsNameWhenTheSettingIsOff() {
+        runBlocking {
+            wiring.settingsRepository.setShowDrawerFolderNames(false)
+            wiring.settingsRepository.createDrawerFolder("Tools")
+        }
+        show()
+        awaitState("the folder is listed without its name") { it.folders.size == 1 && !it.showFolderNames }
+        settle()
+
+        compose.onNodeWithText("Tools").assertDoesNotExist()
+        // Only the visible text goes: TalkBack still gets the name from the tile.
+        compose.onNodeWithContentDescription("Tools").assertExists()
+
+        runBlocking { wiring.settingsRepository.setShowDrawerFolderNames(true) }
+        awaitText("Tools")
+        compose.onAllNodesWithContentDescription("Tools").assertCountEquals(0)
+    }
+
+    private fun awaitState(what: String, condition: (AppDrawerUiState) -> Boolean) {
+        val deadline = System.currentTimeMillis() + 10_000
+        while (!condition(viewModel.uiState.value)) {
+            check(System.currentTimeMillis() < deadline) { "Timed out waiting until $what" }
+            Thread.sleep(20)
+            shadowOf(Looper.getMainLooper()).idle()
+            compose.waitForIdle()
+        }
+    }
+
+    private fun appInfo() = context.getString(R.string.app_info)
+    private fun editTitle() = context.getString(com.kich.launcher.ui.R.string.edit_title)
+
+    /** The drawer on screen with its one app listed. */
+    private fun showWithApp() {
+        show()
+        awaitText(mailApp)
+    }
+
+    /** The drawer's own long-press: a still hold until the icon lifts (the menu opens then), release. */
+    private fun holdIcon() {
+        compose.onNodeWithText(mailApp).performTouchInput { down(center) }
+        compose.mainClock.advanceTimeBy(1_000)
+        settle()
+        compose.onNodeWithText(mailApp).performTouchInput { up() }
+        settle()
+    }
+
+    /** Issue #17: the Add-apps picker filters its list by name as you type, and a pick survives
+     *  the filter. */
+    @Test fun theAddAppsPickerSearchesByName() {
+        showWithFolder()
+        compose.onNodeWithText("Tools").performTouchInput { longClick() }
+        settle()
+        compose.onNodeWithText(addApps()).performClick()
+        settle()
+        assertThat(compose.onAllNodesWithTag(ADD_APPS_ROW_TAG).fetchSemanticsNodes())
+            .hasSize(viewModel.uiState.value.folderCandidates.size)
+
+        compose.onNode(hasTestTag(ADD_APPS_SEARCH_TAG)).performTextInput("zq")
+        settle()
+        assertThat(compose.onAllNodesWithTag(ADD_APPS_ROW_TAG).fetchSemanticsNodes()).isEmpty()
+
+        compose.onNode(hasTestTag(ADD_APPS_SEARCH_TAG)).performTextClearance()
+        compose.onNode(hasTestTag(ADD_APPS_SEARCH_TAG)).performTextInput("MAIL")
+        settle()
+        compose.onAllNodesWithTag(ADD_APPS_ROW_TAG)[0].performClick()
+        compose.onNode(hasTestTag(ADD_APPS_SEARCH_TAG)).performTextInput("zq")
+        settle()
+        compose.onNodeWithText(context.getString(R.string.folder_add)).performClick()
+
+        awaitState("the app joined the folder") { it.folders.single().apps.map { a -> a.packageName } == listOf(mailApp) }
+    }
+
+    /** The app menu and the Edit dialog are windows of their own too: they go with the drawer. */
+    @Test fun closingTheDrawerTakesTheAppMenu() {
+        showWithApp()
+        holdIcon()
+        compose.onNodeWithText(appInfo()).assertExists()
+
+        drawerOpen.value = false
+        settle()
+
+        compose.onNodeWithText(appInfo()).assertDoesNotExist()
+    }
+
+    @Test fun closingTheDrawerTakesTheEditDialog() {
+        showWithApp()
+        holdIcon()
+        compose.onNodeWithText(context.getString(R.string.rename)).performClick()
+        settle()
+        compose.onNodeWithText(editTitle()).assertExists()
+
+        drawerOpen.value = false
+        settle()
+
+        compose.onNodeWithText(editTitle()).assertDoesNotExist()
+    }
+
+    /** The drawer's own windows are opaque: over a dark picture the see-through drawer's labels turn white, but the
+     *  Edit dialog, a light surface in this light theme, keeps dark text. */
+    @Test fun theEditDialogKeepsItsOwnTextOverADarkPicture() {
+        showWithApp()
+        val dark = createBitmap(8, 8, Bitmap.Config.ARGB_8888).apply { eraseColor(android.graphics.Color.BLACK) }
+        runBlocking { wiring.drawerWallpaper.set(dark) }
+        awaitState("the dark picture") { it.wallpaper != null && it.wallpaper!!.luminance < 0.05f }
+        settle()
+        assertThat(textColorOf(mailApp).luminance()).isGreaterThan(0.5f)
+
+        holdIcon()
+        compose.onNodeWithText(context.getString(R.string.rename)).performClick()
+        settle()
+
+        assertThat(textColorOf(editTitle()).luminance()).isLessThan(0.5f)
+    }
+
+    /** The search's section titles sit on the see-through background like the app labels, so over a dark picture they
+     *  turn white with them (the expressive palette, which the opaque cards keep, would leave them dark on dark). */
+    @Test fun theSearchSectionTitlesFollowTheDrawersTextOverADarkPicture() {
+        showWithApp()
+        val dark = createBitmap(8, 8, Bitmap.Config.ARGB_8888).apply { eraseColor(android.graphics.Color.BLACK) }
+        runBlocking { wiring.drawerWallpaper.set(dark) }
+        awaitState("the dark picture") { it.wallpaper != null && it.wallpaper!!.luminance < 0.05f }
+        settle()
+
+        compose.onNode(hasSetTextAction()).performTextInput(mailApp.take(3))
+        settle()
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(500)) // the debounce elapses
+        val appsTitle = context.getString(R.string.search_section_apps)
+        awaitText(appsTitle, unmerged = true)
+
+        assertThat(textColorOf(appsTitle).luminance()).isGreaterThan(0.5f)
+    }
+
+    /** The colour a text is laid out with (its Text's colour merged into its style). */
+    private fun textColorOf(text: String): Color {
+        val node = compose.onAllNodesWithText(text, useUnmergedTree = true).onFirst().fetchSemanticsNode()
+        val results = mutableListOf<TextLayoutResult>()
+        node.config.getOrNull(SemanticsActions.GetTextLayoutResult)?.action?.invoke(results)
+        return results.single().layoutInput.style.color
+    }
+
+    @Test fun aClosingDrawerOpensNoAppMenu() {
+        showWithApp()
+        drawerOpen.value = false
+        settle()
+
+        holdIcon()
+
+        compose.onNodeWithText(appInfo()).assertDoesNotExist()
+    }
+
+    /** The drawer stays composed while it slides away, so a tap can still land on a tile then: no
+     *  card may open over the home screen (the card is a window of its own, it would stay). */
+    @Test fun aClosingDrawerOpensNoFolderCard() {
+        showWithFolder()
+        drawerOpen.value = false
+        settle()
+
+        compose.onNodeWithText("Tools").performClick()
+        settle()
+
+        compose.onNodeWithTag(DRAWER_FOLDER_CARD_TAG).assertDoesNotExist()
+    }
+
+    @Test fun aClosingDrawerOpensNoFolderEditor() {
+        showWithFolder()
+        drawerOpen.value = false
+        settle()
+
+        compose.onNodeWithText("Tools").performTouchInput { longClick() }
+        settle()
+
+        compose.onNodeWithText(addApps()).assertDoesNotExist()
+    }
+
+    /** A card already open goes with the drawer, whatever closed it. */
+    @Test fun closingTheDrawerTakesTheFolderCard() {
+        showWithFolder()
+        compose.onNodeWithText("Tools").performClick()
+        settle()
+        compose.onNodeWithTag(DRAWER_FOLDER_CARD_TAG).assertExists()
+
+        drawerOpen.value = false
+        settle()
+
+        compose.onNodeWithTag(DRAWER_FOLDER_CARD_TAG).assertDoesNotExist()
+    }
+
+    @Test fun homeTakesTheFolderSheetWithTheDrawer() {
+        showWithFolder()
+        compose.onNodeWithText("Tools").performTouchInput { longClick() }
+        settle()
+        compose.onNodeWithText(addApps()).assertExists()
+
+        compose.runOnIdle { homeSignals.tryEmit(true) }
+        settle()
+
+        compose.onNodeWithText(addApps()).assertDoesNotExist()
+    }
+
+    /** The first letter of a search used to flash "No results": the query reaches the screen at
+     *  once while the results (debounced, then searched) still answer the previous query. */
+    @Test fun noResultsWaitsForTheResults() {
+        show()
+        val noResults = context.getString(R.string.search_no_results)
+        compose.onNode(hasSetTextAction()).performTextInput("zq")
+        settle() // the query is on screen; the looper's clock stands still, so the debounce has not run
+        assertThat(viewModel.uiState.value.query).isEqualTo("zq")
+        compose.onNodeWithText(noResults, useUnmergedTree = true).assertDoesNotExist()
+
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(500)) // the debounce elapses; the search runs on its own thread
+        awaitText(noResults, unmerged = true) // nothing on the test device matches "zq"
+
+        assertThat(viewModel.uiState.value.searchPending).isFalse()
+    }
+
+    /** The focus goes the same way as on HOME (the keyboard with it); the query is what a test can see. */
+    @Test fun closingTheDrawerDropsTheQuery() {
+        show()
+        compose.onNode(hasSetTextAction()).performTextInput("ch")
+        settle()
+        assertThat(viewModel.uiState.value.query).isEqualTo("ch")
+
+        // Pulled down, or closed behind a launched app: no HOME press.
+        drawerOpen.value = false
+        settle()
+
+        assertThat(viewModel.uiState.value.query).isEmpty()
+    }
+}

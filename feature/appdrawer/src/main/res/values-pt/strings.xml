@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_drawer_search_hint">Pesquisar apps</string>
+    <string name="add_to_dock">Adicionar ao dock</string>
+    <string name="remove_from_dock">Remover do dock</string>
+    <string name="add_to_home">Adicionar à tela inicial</string>
+    <string name="remove_from_home">Remover da tela inicial</string>
+    <string name="app_info">Informações do app</string>
+    <string name="hide_app">Ocultar app</string>
+    <string name="rename">Editar</string>
+    <string name="uninstall">Desinstalar</string>
+    <string name="folder_name_label">Nome da pasta</string>
+    <string name="folder_add_apps">Adicionar apps</string>
+    <string name="folder_delete">Excluir pasta</string>
+    <string name="folder_remove_hint">Toque e segure um app para removê-lo da pasta</string>
+    <string name="folder_add">Adicionar</string>
+    <string name="folder_cancel">Cancelar</string>
+    <string name="folder_card_empty">Pasta vazia. Toque e segure para adicionar apps.</string>
+    <string name="folder_delete_title">Excluir pasta?</string>
+    <string name="folder_delete_text">“%1$s” será excluída. Seus apps continuam na lista de apps.</string>
+    <string name="folder_delete_confirm">Excluir</string>
+    <string name="folder_move_earlier">Mover pasta para a frente</string>
+    <string name="folder_move_later">Mover pasta para trás</string>
+    <string name="folder_edit">Editar pasta</string>
+    <string name="folder_move_label">Mover pasta</string>
+    <string name="search_section_apps">Apps</string>
+    <string name="search_section_settings">Configurações</string>
+    <string name="search_section_contacts">Contatos</string>
+    <string name="search_calc_copied">Copiado para a área de transferência</string>
+    <string name="search_contact_call">Ligar</string>
+    <string name="search_contact_message">Mensagem</string>
+    <string name="drawer_frequent_apps">Mais usados</string>
+    <string name="search_clear">Limpar pesquisa</string>
+    <string name="search_no_results">Nenhum resultado encontrado</string>
+    <string name="drawer_tab_personal">Pessoal</string>
+    <string name="drawer_tab_work">Trabalho</string>
+    <string name="work_apps_pause">Pausar apps de trabalho</string>
+    <string name="work_apps_unpause">Reativar</string>
+    <string name="work_apps_paused_title">Os apps de trabalho estão pausados</string>
+    <string name="work_apps_paused_body">Os apps de trabalho não podem enviar notificações, usar a bateria nem acessar sua localização.</string>
+</resources>

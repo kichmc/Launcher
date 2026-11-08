@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_drawer_search_hint">Hae sovelluksia</string>
+    <string name="add_to_dock">Lisää dockkiin</string>
+    <string name="remove_from_dock">Poista dockista</string>
+    <string name="add_to_home">Lisää kotinäytölle</string>
+    <string name="remove_from_home">Poista kotinäytöltä</string>
+    <string name="app_info">Sovelluksen tiedot</string>
+    <string name="hide_app">Piilota sovellus</string>
+    <string name="rename">Muokkaa</string>
+    <string name="uninstall">Poista sovellus</string>
+    <string name="folder_name_label">Kansion nimi</string>
+    <string name="folder_add_apps">Lisää sovelluksia</string>
+    <string name="folder_delete">Poista kansio</string>
+    <string name="folder_remove_hint">Paina sovellusta pitkään poistaaksesi sen kansiosta</string>
+    <string name="folder_add">Lisää</string>
+    <string name="folder_cancel">Peruuta</string>
+    <string name="folder_card_empty">Tyhjä kansio. Lisää sovelluksia painamalla kansiota pitkään.</string>
+    <string name="folder_delete_title">Poistetaanko kansio?</string>
+    <string name="folder_delete_text">”%1$s” poistetaan. Sen sovellukset jäävät sovellusluetteloon.</string>
+    <string name="folder_delete_confirm">Poista</string>
+    <string name="folder_move_earlier">Siirrä kansiota aiemmaksi</string>
+    <string name="folder_move_later">Siirrä kansiota myöhemmäksi</string>
+    <string name="folder_edit">Muokkaa kansiota</string>
+    <string name="folder_move_label">Siirrä kansiota</string>
+    <string name="search_section_apps">Sovellukset</string>
+    <string name="search_section_settings">Asetukset</string>
+    <string name="search_section_contacts">Yhteystiedot</string>
+    <string name="search_calc_copied">Kopioitu leikepöydälle</string>
+    <string name="search_contact_call">Soita</string>
+    <string name="search_contact_message">Viesti</string>
+    <string name="drawer_frequent_apps">Eniten käytetyt</string>
+    <string name="search_clear">Tyhjennä haku</string>
+    <string name="search_no_results">Ei hakutuloksia</string>
+    <string name="drawer_tab_personal">Omat</string>
+    <string name="drawer_tab_work">Työ</string>
+    <string name="work_apps_pause">Keskeytä työsovellukset</string>
+    <string name="work_apps_unpause">Jatka</string>
+    <string name="work_apps_paused_title">Työsovellukset on keskeytetty</string>
+    <string name="work_apps_paused_body">Työsovellukset eivät voi lähettää ilmoituksia, käyttää akkua tai sijaintiasi.</string>
+</resources>

@@ -1,0 +1,42 @@
+*.iml
+.gradle/
+/local.properties
+.idea/
+.DS_Store
+**/build/
+/captures
+.externalNativeBuild
+.cxx
+*.apk
+*.ap_
+*.aab
+local.properties
+.kotlin/
+# Release signing material — never commit
+*.jks
+*.keystore
+keystore.properties
+# OAuth credentials — never commit (secrets are not used in the app anyway)
+client_secret*.json
+*.apps.googleusercontent.com.json
+# Icon source export (assets already copied into app/src/main/res)
+/launcher_L/
+# Design reference artifacts kept locally (not part of the app)
+/design-full.png
+/statuspalkki.png
+/Launcher etusivu*.html
+# Ad-hoc device screenshots dropped in for feedback (local only)
+Screenshot_*.png
+
+# AOSP Launcher3 reference (local only, do not commit)
+Launcher3-*.tar.gz
+launcher3_src/
+CellLayout.java
+/celllayout/
+
+# Lawnchair reference (GPL — local only, do NOT commit/redistribute)
+lawnchair-*.zip
+lawnchair-src/
+
+# Design reference drops (local only — extracted/applied, not committed as binaries)
+Android launcherin teeman asetukset.zip

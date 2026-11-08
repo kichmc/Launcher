@@ -1,0 +1,159 @@
+package com.kich.launcher
+
+import com.kich.launcher.feature.home.LauncherWidgetHost
+import com.kich.launcher.feature.home.LocalWidgetReconfigureLauncher
+import android.appwidget.AppWidgetHost
+import android.content.Intent
+import android.os.Bundle
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
+import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
+import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import dagger.hilt.android.AndroidEntryPoint
+import kotlinx.coroutines.channels.BufferOverflow
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.MutableStateFlow
+import com.kich.launcher.ui.LauncherAppTheme
+import com.kich.launcher.feature.home.APPWIDGET_HOST_ID
+import com.kich.launcher.feature.home.LocalAppWidgetHost
+import com.kich.launcher.feature.home.LocalOrphanWidgetConfigResult
+import com.kich.launcher.feature.home.LocalWidgetConfigLauncher
+import com.kich.launcher.model.IconChoices
+import com.kich.launcher.ui.AppLaunchSources
+import com.kich.launcher.ui.LauncherShell
+import com.kich.launcher.ui.LauncherShellViewModel
+import com.kich.launcher.ui.LocalAppLaunchSources
+import com.kich.launcher.ui.LocalIconChoices
+import com.kich.launcher.ui.component.LocalIconEpochs
+import javax.inject.Inject
+
+@AndroidEntryPoint
+class LauncherActivity : ComponentActivity() {
+    /** The icon picker's packs and gallery import (Edit on an app, a folder's icon). */
+    @Inject
+    lateinit var iconChoices: IconChoices
+
+    /** Emits on every HOME intent (onNewIntent). The payload is Launcher3's "alreadyOnHome": true
+     *  when HOME was pressed while the launcher was already the foreground app (→ snap the workspace
+     *  back to the first page), false when the user is coming home from another app (→ keep the page
+     *  they launched from; popups/drawer still get dismissed by the collectors). DROP_OLDEST: a
+     *  collector still animating the previous press must get the latest one — tryEmit with a plain
+     *  buffer of one dropped a third quick press, so the drawer stayed open. */
+    private val homeSignals = MutableSharedFlow<Boolean>(
+        extraBufferCapacity = 1,
+        onBufferOverflow = BufferOverflow.DROP_OLDEST,
+    )
+
+    /** True between onResume and onStop. Device-verified (Pixel 8a, Android 17): the lifecycle STATE
+     *  cannot tell the two HOME cases apart — the system STARTs the launcher during the app-close
+     *  transition before delivering the intent, so it reads STARTED both ways. This flag can, because
+     *  onResume is guaranteed to run only after onNewIntent, while a foreground HOME press only runs
+     *  onPause (the flag stays true until onStop). */
+    private var wasForeground = false
+
+    // Use the Activity context (not applicationContext) for the host — Launcher3 does the same; a
+    // collection widget's RemoteViewsAdapter and the host's listener callbacks register against this.
+    private val appWidgetHost by lazy { LauncherWidgetHost(this, APPWIDGET_HOST_ID) }
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        installSplashScreen()
+        super.onCreate(savedInstanceState)
+        enableEdgeToEdge()
+        keepHomeOnBack()
+        setContent {
+            LauncherAppTheme {
+                // Icon re-fetch epochs above EVERY icon surface (home, dock, drawer, folder sheets):
+                // a package update bumps its epoch, which re-keys and re-fetches that icon everywhere
+                // — including AsyncImages already on screen, which only re-load on a model change.
+                val iconEpochs by hiltViewModel<LauncherShellViewModel>().iconEpochs.collectAsStateWithLifecycle()
+                // The icon a tap landed on, so the app opens with a zoom from it.
+                val launchSources = remember { AppLaunchSources() }
+                CompositionLocalProvider(
+                    LocalAppWidgetHost provides appWidgetHost,
+                    LocalWidgetConfigLauncher provides ::startWidgetConfig,
+                    LocalWidgetReconfigureLauncher provides { id ->
+                        startWidgetReconfigure(id) { widgetId, requestCode, options ->
+                            appWidgetHost.startAppWidgetConfigureActivityForResult(this, widgetId, 0, requestCode, options)
+                        }
+                    },
+                    LocalOrphanWidgetConfigResult provides orphanConfigResult,
+                    LocalIconEpochs provides iconEpochs,
+                    LocalAppLaunchSources provides launchSources,
+                    LocalIconChoices provides iconChoices,
+                ) {
+                    LauncherShell(
+                        homeSignals = homeSignals,
+                        onOpenSettings = { startActivity(Intent(this, SettingsActivity::class.java)) },
+                    )
+                }
+            }
+        }
+    }
+
+    /** Pending callback for the in-flight widget configuration activity (see [startWidgetConfig]). */
+    private var pendingConfigCallback: ((Boolean) -> Unit)? = null
+
+    /** A config result that arrived with NO live callback: the process was killed while the widget's
+     *  configuration activity was in front and the system redelivered the result to a fresh instance.
+     *  The home screen consumes it against its process-death-surviving pending-bind state. */
+    private val orphanConfigResult = MutableStateFlow<Boolean?>(null)
+
+    /**
+     * Launches [appWidgetId]'s configuration activity through the system so the framework marks the
+     * widget configured (a raw ACTION_APPWIDGET_CONFIGURE Intent does not), with the grant that lets
+     * Android 14+ start it ([widgetConfigLaunchOptions]). The result arrives in [onActivityResult].
+     * Used by the home screen's add-widget flow via [LocalWidgetConfigLauncher].
+     */
+    private fun startWidgetConfig(appWidgetId: Int, onResult: (Boolean) -> Unit) {
+        pendingConfigCallback = onResult
+        val launched = runCatching {
+            appWidgetHost.startAppWidgetConfigureActivityForResult(
+                this, appWidgetId, 0, WIDGET_CONFIG_REQUEST, widgetConfigLaunchOptions()?.toBundle(),
+            )
+        }.isSuccess
+        if (!launched) {
+            pendingConfigCallback = null
+            onResult(false)
+        }
+    }
+
+    @Deprecated("Required for AppWidgetHost.startAppWidgetConfigureActivityForResult (legacy result API)")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (isWidgetConfigResult(requestCode)) {
+            val ok = resultCode == android.app.Activity.RESULT_OK
+            val cb = pendingConfigCallback
+            pendingConfigCallback = null
+            if (cb != null) cb(ok) else orphanConfigResult.value = ok
+        }
+    }
+
+    override fun onStart() {
+        super.onStart()
+        // A launcher is the device HOME — a host hiccup must never crash it.
+        runCatching { appWidgetHost.startListening() }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        wasForeground = true
+    }
+
+    override fun onStop() {
+        super.onStop()
+        runCatching { appWidgetHost.stopListening() }
+        wasForeground = false
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        // Not hasWindowFocus() like Launcher3 — our Compose popups are separate windows and would
+        // steal focus from the activity. See [wasForeground] for why not lifecycle.currentState.
+        homeSignals.tryEmit(wasForeground)
+    }
+}

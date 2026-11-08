@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Kich Launcher</string>
+    <string name="set_default_launcher">Set as default launcher</string>
+    <string name="default_launcher_active">Default launcher active</string>
+    <string name="settings_label">Kich Launcher settings</string>
+    <string name="wallpaper_title">Wallpaper</string>
+    <string name="wallpaper_preview">Selected wallpaper preview</string>
+    <string name="wallpaper_none">No wallpaper chosen yet. Pick an image from your device.</string>
+    <string name="wallpaper_choose">Choose image</string>
+    <string name="wallpaper_home">Home screen</string>
+    <string name="wallpaper_lock">Lock screen</string>
+    <string name="wallpaper_both">Both</string>
+    <string name="wallpaper_applied">Wallpaper applied.</string>
+    <string name="wallpaper_last_applied">Last applied to: %1$s</string>
+    <string name="wallpaper_error_read">Could not read that image.</string>
+    <string name="wallpaper_error_apply">Android did not accept the wallpaper change.</string>
+    <string name="wallpaper_not_allowed">This device does not allow changing the wallpaper.</string>
+</resources>

@@ -1,0 +1,40 @@
+ARK-launcher
+Copyright 2026 ARK-launcher contributors
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+
+------------------------------------------------------------------------------
+Third-party attributions
+------------------------------------------------------------------------------
+
+This product includes design and implementation patterns adapted from the
+Android Open Source Project (AOSP) Launcher3, licensed under the
+Apache License, Version 2.0:
+
+    https://android.googlesource.com/platform/packages/apps/Launcher3/
+    Copyright (C) The Android Open Source Project
+
+Launcher3 is a View-system application; the patterns below were re-implemented
+from scratch in Jetpack Compose for this project (the model was adapted, not
+the code copied verbatim):
+
+  - the drag layer / drag controller model (cross-surface icon drag between
+    the workspace, dock and app drawer);
+  - live drop feedback and drop targets;
+  - folders (drop icon-on-icon), notification dots, and pinned deep shortcuts;
+  - the widget edit frame (resize / move / remove / reconfigure), adapted from
+    AppWidgetResizeFrame, DeleteDropTarget and isReconfigurable;
+  - widget size options for hosted widgets (so collection widgets populate),
+    adapted from WidgetSizes.getWidgetSizeOptions; and the scrollable-content
+    check, adapted from LauncherAppWidgetHostView.checkScrollableRecursively.
+
+This project does not include source code from Lawnchair; only high-level
+concepts were studied from it (current Lawnchair is Apache-2.0). The
+implementations here are original.
+
+Weather data in the clock widget is provided by Open-Meteo
+(https://open-meteo.com/), licensed under CC BY 4.0.
+
+When the device has no local geocoder backend, the place name shown next to
+the weather uses the free client-side reverse-geocoding API by BigDataCloud
+(https://www.bigdatacloud.com/).

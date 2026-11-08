@@ -1,0 +1,1213 @@
+package com.kich.launcher.data
+
+import androidx.room.withTransaction
+import kotlinx.coroutines.flow.Flow
+import com.kich.launcher.data.local.HomeItemDao
+import com.kich.launcher.data.local.HomeItemEntity
+import com.kich.launcher.data.local.HomeItemEntity.Companion.DOCK
+import com.kich.launcher.data.local.HomeItemEntity.Companion.HOME
+import com.kich.launcher.data.local.LauncherDatabase
+import com.kich.launcher.model.AppItem
+import javax.inject.Inject
+import javax.inject.Singleton
+
+/** The shortcut ids still pinned for a (package, user) after a removal — used to re-pin the set. */
+data class RemainingPins(
+    val packageName: String,
+    val userSerial: Long,
+    val shortcutIds: List<String>,
+    /** The shortcut that just left home (its icon, filed under its identity, goes with its last copy). */
+    val removedShortcutId: String = "",
+)
+
+/** One row's target grid position (and sanitized span) in a [HomeLayoutRepository.reflowPlan]. */
+data class ReflowPlacement(
+    val id: Long, val page: Int, val cellX: Int, val cellY: Int, val spanX: Int, val spanY: Int,
+)
+
+/** What [HomeLayoutRepository.removeStaleAppRows] changes: rows to delete, and app rows to point at
+ *  another launcher activity (row id → new class name). */
+internal data class SweepPlan(val delete: Set<Long>, val remap: Map<Long, String>)
+
+/** Where [HomeLayoutRepository.firstRectWithPush] places a new rect, plus the displacements
+ *  (rowId → new cell on [page]) that free it. Empty [moved] = the rect was genuinely free. */
+data class PushPlacement(val page: Int, val cellX: Int, val cellY: Int, val moved: Map<Long, Pair<Int, Int>>)
+
+/** What became of a placement at a cell the user chose ([HomeLayoutRepository.placeAt]). */
+enum class PlaceResult {
+    /** Stored at the cell, or at the first free cell when the chosen one was taken. */
+    Placed,
+
+    /** The app is already on home and the cell lies inside a widget's rectangle; nothing changed. */
+    Blocked,
+
+    /** No free cell on any page the pager shows ([HomeLayoutRepository.isShownPage]); nothing changed. */
+    HomeFull,
+}
+
+/**
+ * Persists the home layout (Room): app shortcuts and folders placed at free cells, and the apps
+ * inside each folder. Top-level items live in the [HOME] container, the dock's apps and folders in
+ * the [DOCK] container (slot = cellX); a folder's children live in the container identified by the
+ * folder row's id. Each container is an independent cell space guarded by the unique (containerId,
+ * page, cellX, cellY) index, so the swaps/repacks below stay collision-free.
+ */
+@Singleton
+class HomeLayoutRepository @Inject constructor(
+    private val db: LauncherDatabase,
+    private val dao: HomeItemDao,
+    private val resolver: AppRowResolver,
+) {
+    /** All rows (home items, folders, folder children); the ViewModel partitions by container. */
+    val homeItems: Flow<List<HomeItemEntity>> = dao.observeAll()
+
+    /** Puts [appItem] at the first free home cell. True when it is on home afterwards (placed now or
+     *  already there); false — nothing stored — when every page the pager shows is full. */
+    suspend fun addToHome(appItem: AppItem, columns: Int, rows: Int): Boolean =
+        // Atomic count-then-insert: without a transaction a fast double call could read "absent" twice
+        // and place the same app into two different cells.
+        db.withTransaction {
+            if (dao.count(HOME, appItem.packageName, appItem.className, appItem.userSerial) > 0) {
+                return@withTransaction true
+            }
+            val (page, cellX, cellY) = firstFreeCell(dao.getContainer(HOME), columns, rows)
+            if (!isShownPage(page)) return@withTransaction false
+            dao.insert(homeApp(appItem, HOME, page, cellX, cellY))
+            true
+        }
+
+    /** Moves/swaps a home item to a target home cell. Returns false if the item is gone OR the target
+     *  is inside a widget's rectangle (so the caller rolls its optimistic placement back). */
+    suspend fun moveItem(appItem: AppItem, page: Int, cellX: Int, cellY: Int): Boolean =
+        db.withTransaction {
+            val source = dao.getByKey(HOME, appItem.packageName, appItem.className, appItem.userSerial)
+                ?: return@withTransaction false
+            moveOrSwap(source, page, cellX, cellY)
+        }
+
+    /** Places [appItem] on the home screen at a cell (a dock→home or drawer→home drop). An app in
+     *  that cell folds the two into a new folder named [folderName] and a folder there takes the
+     *  icon in — what a drop between two home icons does — an icon already on home leaving its old
+     *  cell for it. Anything else under the finger (a shortcut, a widget, a builtin) swaps with an
+     *  icon already on home or sends a new one to the first free cell. Nothing is stored unless the
+     *  result is [PlaceResult.Placed]. */
+    suspend fun placeAt(
+        appItem: AppItem,
+        page: Int,
+        cellX: Int,
+        cellY: Int,
+        columns: Int,
+        rows: Int,
+        folderName: String,
+    ): PlaceResult =
+        db.withTransaction {
+            val existing = dao.getByKey(HOME, appItem.packageName, appItem.className, appItem.userSerial)
+            val occupant = if (isShownPage(page)) dao.getAt(HOME, page, cellX, cellY) else null
+            if (occupant != null && occupant.id != existing?.id) {
+                when {
+                    occupant.isApp -> {
+                        foldApps(occupant, existing, appItem, folderName)
+                        return@withTransaction PlaceResult.Placed
+                    }
+                    occupant.isFolder -> {
+                        joinFolder(occupant.id, existing, appItem)
+                        return@withTransaction PlaceResult.Placed
+                    }
+                }
+            }
+            if (existing != null) {
+                return@withTransaction when {
+                    !isShownPage(page) -> PlaceResult.HomeFull
+                    moveOrSwap(existing, page, cellX, cellY) -> PlaceResult.Placed
+                    else -> PlaceResult.Blocked
+                }
+            }
+            val items = dao.getContainer(HOME)
+            val (p, x, y) = if (isShownPage(page) && dao.getAt(HOME, page, cellX, cellY) == null &&
+                !cellInWidget(items, -1L, page, cellX, cellY)
+            ) {
+                Triple(page, cellX, cellY)
+            } else {
+                firstFreeCell(items, columns, rows)
+            }
+            if (!isShownPage(p)) return@withTransaction PlaceResult.HomeFull
+            dao.insert(homeApp(appItem, HOME, p, x, y))
+            PlaceResult.Placed
+        }
+
+    suspend fun removeFromHome(appItem: AppItem) {
+        dao.deleteByKey(HOME, appItem.packageName, appItem.className, appItem.userSerial)
+    }
+
+    /** Moves/swaps a folder (or any home row, by id) to a target home cell. */
+    suspend fun moveFolder(folderId: Long, page: Int, cellX: Int, cellY: Int): Boolean =
+        db.withTransaction {
+            val source = dao.getById(folderId) ?: return@withTransaction false
+            moveOrSwap(source, page, cellX, cellY)
+        }
+
+    /** Pins a deep shortcut at the first free home cell. True when it is on home afterwards (placed
+     *  now or already there); false — nothing stored — when every page the pager shows is full. */
+    suspend fun addShortcut(packageName: String, shortcutId: String, userSerial: Long, columns: Int, rows: Int): Boolean =
+        db.withTransaction {
+            val present = dao.getContainer(HOME).any {
+                it.shortcutId == shortcutId && it.packageName == packageName && it.userSerial == userSerial
+            }
+            if (present) return@withTransaction true
+            val (page, x, y) = firstFreeCell(dao.getContainer(HOME), columns, rows)
+            if (!isShownPage(page)) return@withTransaction false
+            dao.insert(
+                HomeItemEntity(
+                    containerId = HOME,
+                    packageName = packageName,
+                    userSerial = userSerial,
+                    shortcutId = shortcutId,
+                    page = page,
+                    cellX = x,
+                    cellY = y,
+                ),
+            )
+            true
+        }
+
+    /**
+     * Stores the shortcut another app asked to pin ([PinRequestStore]). Unlike [addShortcut], one
+     * already on home gets a second row: the platform requires a request for a pinned shortcut to
+     * produce a new icon. Goes to ([page], [cellX], [cellY]) — the cell the confirmation decided on —
+     * if it is still free, else to the first free cell: home may have changed while the confirmation
+     * was open. Both are judged inside the transaction. Null (nothing stored) when even that cell
+     * is not on a page the pager shows ([isShownPage]).
+     */
+    suspend fun insertRequestedShortcut(
+        packageName: String, shortcutId: String, userSerial: Long,
+        page: Int, cellX: Int, cellY: Int, columns: Int, rows: Int,
+    ): Long? = db.withTransaction {
+        val items = dao.getContainer(HOME)
+        val (p, x, y) = if (rectFitsForRow(items, NO_ROW, page, cellX, cellY, 1, 1, columns, rows)) {
+            Triple(page, cellX, cellY)
+        } else {
+            firstFreeCell(items, columns, rows)
+        }
+        if (!isShownPage(p)) return@withTransaction null
+        dao.insert(
+            HomeItemEntity(
+                containerId = HOME,
+                packageName = packageName,
+                userSerial = userSerial,
+                shortcutId = shortcutId,
+                page = p,
+                cellX = x,
+                cellY = y,
+            ),
+        )
+    }
+
+    /**
+     * Stores the app widget another app asked to pin ([PinRequestStore.acceptBoundWidget]), already
+     * bound to [appWidgetId]. The row carries the same fields as one [addWidgetAt] stores. Goes to
+     * ([page], [cellX], [cellY]) — the rectangle the confirmation decided on — if it is still free,
+     * else to the first free rectangle of the same size; nothing else is moved for it. Both are
+     * judged inside the transaction. Null (nothing stored) when even that is not on a page the
+     * pager shows ([isShownPage]).
+     */
+    suspend fun insertRequestedWidget(
+        appWidgetId: Int, provider: String,
+        page: Int, cellX: Int, cellY: Int, spanX: Int, spanY: Int, columns: Int, rows: Int,
+    ): Long? = db.withTransaction {
+        val items = dao.getContainer(HOME)
+        val sx = spanX.coerceIn(1, columns.coerceAtLeast(1))
+        val sy = spanY.coerceIn(1, rows.coerceAtLeast(1))
+        val (p, x, y) = if (rectFitsForRow(items, NO_ROW, page, cellX, cellY, sx, sy, columns, rows)) {
+            Triple(page, cellX, cellY)
+        } else {
+            firstFreeRect(items, columns, sx, sy, rows)
+        }
+        if (!isShownPage(p)) return@withTransaction null
+        dao.insert(
+            HomeItemEntity(
+                containerId = HOME,
+                page = p, cellX = x, cellY = y,
+                spanX = sx, spanY = sy,
+                appWidgetId = appWidgetId,
+                widgetProvider = provider,
+            ),
+        )
+    }
+
+    /** The shortcut ids of (package, profile) on home right now — the set the system should hold. */
+    suspend fun homeShortcutIds(packageName: String, userSerial: Long): List<String> =
+        dao.getContainer(HOME)
+            .filter { it.isShortcut && it.packageName == packageName && it.userSerial == userSerial }
+            .mapNotNull { it.shortcutId }
+            .distinct()
+
+    /** Removes a pinned-shortcut row; returns the ids still pinned for its (package, user) so the
+     *  caller can re-pin the remaining set in the system (pinShortcuts replaces the whole set). */
+    suspend fun removeShortcut(rowId: Long): RemainingPins? = db.withTransaction {
+        val row = dao.getById(rowId) ?: return@withTransaction null
+        if (!row.isShortcut) return@withTransaction null
+        dao.deleteById(rowId)
+        val remaining = dao.getContainer(HOME)
+            .filter { it.shortcutId != null && it.packageName == row.packageName && it.userSerial == row.userSerial }
+            .mapNotNull { it.shortcutId }
+        RemainingPins(row.packageName, row.userSerial, remaining, removedShortcutId = row.shortcutId.orEmpty())
+    }
+
+    /**
+     * Repacks the top-level home items (apps, folders, widgets) into a [columns]-wide grid via
+     * [reflowPlan]: reading order is preserved, widgets keep (or shrink to fit) their footprint and
+     * the packing reserves it, overflow spills onto later pages. Folder *contents* are untouched.
+     */
+    suspend fun reflow(columns: Int, rows: Int) {
+        if (columns <= 0 || rows <= 0) return
+        db.withTransaction {
+            val items = dao.getContainerOrdered(HOME)
+            if (items.isEmpty()) return@withTransaction
+            val plan = reflowPlan(items, columns, rows)
+            // Park everything off-grid first (unique temp cells) so the repack can't collide.
+            items.forEachIndexed { i, row -> dao.moveById(row.id, HOME, -1, -(i + 1), -1) }
+            items.zip(plan).forEach { (row, p) ->
+                dao.moveById(p.id, HOME, p.page, p.cellX, p.cellY)
+                // Persist a span shrink (widget wider/taller than the new grid, or a corrupt span).
+                if (p.spanX != row.spanX || p.spanY != row.spanY) dao.updateSpans(p.id, p.spanX, p.spanY)
+            }
+        }
+    }
+
+    // --- Folders ---------------------------------------------------------------------------------
+
+    /**
+     * Creates a folder at [target]'s home cell containing [target] and [dropped] (dropped onto it).
+     * Returns the new folder id, or -1 if either app is no longer on the home screen.
+     */
+    suspend fun createFolder(target: AppItem, dropped: AppItem, name: String): Long =
+        db.withTransaction {
+            val targetRow = dao.getByKey(HOME, target.packageName, target.className, target.userSerial)
+                ?: return@withTransaction -1L
+            val droppedRow = dao.getByKey(HOME, dropped.packageName, dropped.className, dropped.userSerial)
+                ?: return@withTransaction -1L
+            if (targetRow.id == droppedRow.id) return@withTransaction -1L
+            foldApps(targetRow, droppedRow, dropped, name)
+        }
+
+    /** [target]'s cell (on home or in the dock) becomes a folder named [name] holding [target] first
+     *  and [dropped] second — [droppedRow], its row wherever it was, moves in; without one a new child
+     *  row is made. Returns the folder's id. */
+    private suspend fun foldApps(target: HomeItemEntity, droppedRow: HomeItemEntity?, dropped: AppItem, name: String): Long {
+        // Folder starts off-grid so it doesn't clash with the target cell it's about to take over.
+        val folderId = dao.insert(
+            HomeItemEntity(containerId = target.containerId, folderName = name, page = -1, cellX = -1, cellY = -1),
+        )
+        dao.moveById(target.id, folderId, 0, 0, 0)
+        if (droppedRow != null) dao.moveById(droppedRow.id, folderId, 0, 1, 0)
+        else dao.insert(homeApp(dropped, folderId, 0, 1, 0))
+        dao.moveById(folderId, target.containerId, target.page, target.cellX, target.cellY)
+        return folderId
+    }
+
+    /** Appends [dropped] to [folderId] after its current children — [droppedRow], its home row,
+     *  moves in; without one a new child row is made. A folder that already holds the app takes
+     *  no duplicate child (duplicate keys crash the folder grid): the home row, if any, just goes. */
+    private suspend fun joinFolder(folderId: Long, droppedRow: HomeItemEntity?, dropped: AppItem) {
+        if (dao.getByKey(folderId, dropped.packageName, dropped.className, dropped.userSerial) != null) {
+            if (droppedRow != null) dao.deleteById(droppedRow.id)
+            return
+        }
+        val order = dao.childCount(folderId)
+        if (droppedRow != null) dao.moveById(droppedRow.id, folderId, 0, order, 0)
+        else dao.insert(homeApp(dropped, folderId, 0, order, 0))
+    }
+
+    /** Moves [appItem] off the home screen into [folderId], appended after its current children.
+     *  If the folder already contains the app the drop merges: the direct home icon is removed
+     *  instead of inserting a duplicate child (duplicate keys crash the folder grid). */
+    suspend fun addToFolder(appItem: AppItem, folderId: Long) {
+        db.withTransaction {
+            // The folder may have dissolved between the drag's start and the drop (its other apps
+            // uninstalled meanwhile): a row moved into a container no folder owns shows nowhere.
+            if (dao.getById(folderId)?.isFolder != true) return@withTransaction
+            val row = dao.getByKey(HOME, appItem.packageName, appItem.className, appItem.userSerial)
+                ?: return@withTransaction
+            joinFolder(folderId, row, appItem)
+        }
+    }
+
+    /**
+     * Moves [appItem] out of [folderId] back to a free home cell. Re-indexes the remaining children;
+     * if only one is left the folder is dissolved (the last app takes the folder's cell). An app that
+     * already has a home icon merges into it instead: the UI keys icons by app, so a second HOME row
+     * of one app breaks drag and remove (both rows go, one stays invisible). False — the app stays
+     * in the folder — when it needs a cell and every page the pager shows is full.
+     */
+    suspend fun removeFromFolder(appItem: AppItem, folderId: Long, columns: Int, rows: Int): Boolean =
+        db.withTransaction {
+            val row = dao.getByKey(folderId, appItem.packageName, appItem.className, appItem.userSerial)
+                ?: return@withTransaction true
+            if (onHome(row)) {
+                dao.deleteById(row.id)
+            } else {
+                val (p, x, y) = firstFreeCell(dao.getContainer(HOME), columns, rows)
+                if (!isShownPage(p)) return@withTransaction false
+                dao.moveById(row.id, HOME, p, x, y)
+            }
+            reindexFolder(folderId)
+            dissolveIfNeeded(folderId)
+            true
+        }
+
+    /**
+     * Reorders [appItem] inside [folderId] so it sits just before [before] — null, or a [before] the
+     * folder no longer holds, puts it last. Works on the child rows, not on what the folder grid
+     * shows: a child the home screen hides (a disabled app, a paused profile) keeps its place next
+     * to its neighbours. The rows are parked at negative cells before the final indices so the
+     * unique (container, page, cellX, cellY) index never trips. False when the folder does not hold
+     * the app (it vanished during the drag): nothing changed.
+     */
+    suspend fun moveWithinFolder(folderId: Long, appItem: AppItem, before: AppItem?): Boolean =
+        db.withTransaction {
+            val children = dao.getContainerOrdered(folderId)
+            val moving = children.firstOrNull { it.key == appItem.key } ?: return@withTransaction false
+            val rest = children.filter { it.id != moving.id }
+            val insertAt = before?.let { b -> rest.indexOfFirst { it.key == b.key } }?.takeIf { it >= 0 } ?: rest.size
+            val order = rest.toMutableList().apply { add(insertAt, moving) }
+            if (order.map { it.id } == children.map { it.id }) return@withTransaction true
+            order.forEachIndexed { i, child -> dao.moveById(child.id, folderId, 0, -1 - i, 0) }
+            order.forEachIndexed { i, child -> dao.moveById(child.id, folderId, 0, i, 0) }
+            true
+        }
+
+    /**
+     * An app dragged out of an open folder onto a home cell: the child row itself leaves [folderId]
+     * for the cell with exactly [placeAt]'s rules — an empty cell takes it, an app there folds the two
+     * into a new folder named [folderName] (that app first), a folder there takes it in at the end,
+     * the source folder's own cell changes nothing, a shortcut's, widget's or builtin's cell sends it
+     * to the first free cell. An app that already has its own home icon merges into it (the child
+     * row goes) instead of making a duplicate icon. [PlaceResult.HomeFull] — nothing changed — when
+     * it needs a cell and every page the pager shows is full, or when [page] is one the pager never
+     * shows (the trailing drop page). Never [PlaceResult.Blocked]. The remaining children are
+     * re-indexed and a folder left with one app dissolves.
+     */
+    suspend fun moveOutOfFolderTo(
+        appItem: AppItem,
+        folderId: Long,
+        page: Int,
+        cellX: Int,
+        cellY: Int,
+        columns: Int,
+        rows: Int,
+        folderName: String,
+    ): PlaceResult =
+        db.withTransaction {
+            val child = dao.getByKey(folderId, appItem.packageName, appItem.className, appItem.userSerial)
+                ?: return@withTransaction PlaceResult.Placed
+            if (onHome(child)) {
+                dao.deleteById(child.id)
+            } else {
+                if (!isShownPage(page)) return@withTransaction PlaceResult.HomeFull
+                val occupant = dao.getAt(HOME, page, cellX, cellY)
+                when {
+                    occupant?.id == folderId -> return@withTransaction PlaceResult.Placed
+                    occupant?.isApp == true -> foldApps(occupant, child, appItem, folderName)
+                    occupant?.isFolder == true -> joinFolder(occupant.id, child, appItem)
+                    else -> {
+                        val items = dao.getContainer(HOME)
+                        val (p, x, y) = if (occupant == null && !cellInWidget(items, -1L, page, cellX, cellY)) {
+                            Triple(page, cellX, cellY)
+                        } else {
+                            firstFreeCell(items, columns, rows)
+                        }
+                        if (!isShownPage(p)) return@withTransaction PlaceResult.HomeFull
+                        dao.moveById(child.id, HOME, p, x, y)
+                    }
+                }
+            }
+            reindexFolder(folderId)
+            dissolveIfNeeded(folderId)
+            PlaceResult.Placed
+        }
+
+    /** Deletes the child row of [appItem] in [folderId] — the app went to the dock, or to the remove
+     *  pill — then re-indexes the rest and dissolves a folder left with one app. No-op when the row
+     *  is already gone. */
+    suspend fun removeChild(appItem: AppItem, folderId: Long) {
+        db.withTransaction {
+            val child = dao.getByKey(folderId, appItem.packageName, appItem.className, appItem.userSerial)
+                ?: return@withTransaction
+            dao.deleteById(child.id)
+            reindexFolder(folderId)
+            dissolveIfNeeded(folderId)
+        }
+    }
+
+    suspend fun renameFolder(folderId: Long, name: String) {
+        dao.renameFolder(folderId, name)
+    }
+
+    /** Deletes a folder together with every child. The way out for a folder whose apps all fail to
+     *  resolve (disabled, a paused profile): it renders empty, so no child can be dragged out of it.
+     *  No-op when [folderId] is gone or isn't a folder. */
+    suspend fun removeFolder(folderId: Long) {
+        db.withTransaction {
+            val folder = dao.getById(folderId)?.takeIf { it.isFolder } ?: return@withTransaction
+            dao.deleteByContainers(listOf(folderId))
+            dao.deleteById(folderId)
+            // A dock folder leaves a slot gap; the next append counts the rows for its slot and would
+            // land on a taken cell (unique index) unless the slots are closed here.
+            if (folder.containerId == DOCK) renumberDock()
+        }
+    }
+
+    // --- Dock (Launcher3's hotseat: the [DOCK] container, cellX = slot) ---------------------------
+
+    /** Appends [app] to the dock. False (nothing stored) when it already has a dock row. */
+    suspend fun addToDock(app: AppItem): Boolean = db.withTransaction {
+        if (dockRow(app) != null) return@withTransaction false
+        // Parked first, numbered after: the row count is not a free slot while the dock has a gap.
+        val id = dao.insert(homeApp(app, DOCK, 0, PARKED_SLOT, 0))
+        writeDockOrder(dao.getContainerOrdered(DOCK).map { it.id }.filter { it != id } + id)
+        true
+    }
+
+    /**
+     * Puts [app] into the dock at [index] (clamped), moving its existing dock row there if it has
+     * one — never a duplicate. The dock shows only folders and the apps that resolve, so the drop
+     * index counts those: given [shownKeys], [index] is read in that shown order and the row lands
+     * right before the shown row at that position (or right after the last shown one); without it,
+     * [index] is a raw slot and hidden rows in between shift the drop.
+     */
+    suspend fun addToDockAt(app: AppItem, index: Int, shownKeys: Set<String>? = null) = db.withTransaction {
+        val existing = dockRow(app)
+        val row = existing ?: dao.getById(dao.insert(homeApp(app, DOCK, 0, PARKED_SLOT, 0)))!!
+        insertDockRow(row, index, shownKeys)
+    }
+
+    /** Drops [app]'s own dock row (a folder's child is not touched) and closes the gap. */
+    suspend fun removeFromDock(app: AppItem) = db.withTransaction {
+        dao.deleteByKey(DOCK, app.packageName, app.className, app.userSerial)
+        renumberDock()
+    }
+
+    /**
+     * Puts the dock rows [rowIds] (the slots the dock shows, in their new order) first; rows the
+     * column cap hides keep their relative order after them, so the UI can never overwrite the full
+     * list. Ids that are not dock rows are ignored.
+     */
+    suspend fun reorderDock(rowIds: List<Long>) = db.withTransaction {
+        val rows = dao.getContainerOrdered(DOCK)
+        val byId = rows.associateBy { it.id }
+        val given = rowIds.distinct().mapNotNull { byId[it] }
+        val givenIds = given.mapTo(HashSet()) { it.id }
+        writeDockOrder((given + rows.filter { it.id !in givenIds }).map { it.id })
+    }
+
+    /** True while nothing has ever been put in the dock (first run). */
+    suspend fun isDockEmpty(): Boolean = dao.getContainer(DOCK).isEmpty()
+
+    /** The first-run default dock: [apps] in order, only while the dock is still empty. */
+    suspend fun seedDock(apps: List<AppItem>) = db.withTransaction {
+        if (dao.getContainer(DOCK).isNotEmpty()) return@withTransaction
+        apps.distinctBy { it.key }.forEachIndexed { i, app -> dao.insert(homeApp(app, DOCK, 0, i, 0)) }
+    }
+
+    /**
+     * One-time upgrade from the favourites key list of versions before 0.9.7: every well-formed key
+     * ("package/class/userSerial") without a dock row yet is appended, in key order, after the rows
+     * already there. Idempotent, so the caller may clear the key only after this returned.
+     */
+    suspend fun migrateDockFavorites(keys: List<String>) = db.withTransaction {
+        val present = dao.getContainerOrdered(DOCK).mapTo(HashSet()) { it.key }
+        var slot = present.size
+        for (key in keys.distinct()) {
+            val parts = key.split('/')
+            val serial = parts.getOrNull(2)?.toLongOrNull() ?: continue
+            if (parts.size != 3 || parts[0].isEmpty() || key in present) continue
+            dao.insert(
+                HomeItemEntity(
+                    containerId = DOCK, packageName = parts[0], className = parts[1], userSerial = serial,
+                    page = 0, cellX = slot++, cellY = 0,
+                ),
+            )
+            present += key
+        }
+        renumberDock()
+    }
+
+    /** A dock icon dropped on a home cell: placed with [placeAt]'s rules, and only once stored
+     *  there does its dock row go (the dock closes the gap). */
+    suspend fun moveDockAppToHome(
+        app: AppItem, page: Int, cellX: Int, cellY: Int, columns: Int, rows: Int, folderName: String,
+    ): PlaceResult = db.withTransaction {
+        val result = placeAt(app, page, cellX, cellY, columns, rows, folderName)
+        if (result == PlaceResult.Placed) {
+            dao.deleteByKey(DOCK, app.packageName, app.className, app.userSerial)
+            renumberDock()
+        }
+        result
+    }
+
+    /** A home icon dropped between dock tiles at [index] (see [addToDockAt]): its home row becomes
+     *  the dock row, or just goes when the app is already in the dock. */
+    suspend fun moveHomeAppToDock(app: AppItem, index: Int, shownKeys: Set<String>? = null) = db.withTransaction {
+        val home = dao.getByKey(HOME, app.packageName, app.className, app.userSerial)
+        val existing = dockRow(app)
+        val row = when {
+            existing != null -> { home?.let { dao.deleteById(it.id) }; existing }
+            home != null -> { dao.moveById(home.id, DOCK, 0, PARKED_SLOT, 0); dao.getById(home.id)!! }
+            else -> dao.getById(dao.insert(homeApp(app, DOCK, 0, PARKED_SLOT, 0)))!!
+        }
+        insertDockRow(row, index, shownKeys)
+    }
+
+    /** An app dragged out of its open folder onto the dock's free space: into the dock at [index]
+     *  (see [addToDockAt]; null = appended) — its child row becomes the dock row, or, when the app
+     *  already has one, that row takes the slot (as [moveHomeAppToDock] does) and the child just goes;
+     *  the folder is re-indexed and dissolves when one app is left. */
+    suspend fun moveChildToDock(app: AppItem, folderId: Long, index: Int? = null, shownKeys: Set<String>? = null) =
+        db.withTransaction {
+            val child = dao.getByKey(folderId, app.packageName, app.className, app.userSerial)
+                ?: return@withTransaction
+            val existing = dockRow(app)
+            val row = if (existing != null) {
+                dao.deleteById(child.id)
+                existing
+            } else {
+                dao.moveById(child.id, DOCK, 0, PARKED_SLOT, 0)
+                dao.getById(child.id)!!
+            }
+            when {
+                index != null -> insertDockRow(row, index, shownKeys)
+                existing == null -> writeDockOrder(dao.getContainerOrdered(DOCK).map { it.id }.filter { it != row.id } + row.id)
+            }
+            reindexFolder(folderId)
+            dissolveIfNeeded(folderId)
+        }
+
+    /**
+     * [dropped] dropped onto the dock app [target]: the slot becomes a folder named [name] holding
+     * [target] first and [dropped] second. [fromContainer] says where [dropped]'s row is — [HOME],
+     * [DOCK], a folder's id, or null for the drawer (no row) — so that row moves in; a source folder
+     * is re-indexed and dissolves when one app is left. Returns the folder id, -1 when [target] is
+     * not a dock app (or is [dropped] itself).
+     */
+    suspend fun createDockFolder(target: AppItem, dropped: AppItem, fromContainer: Long?, name: String): Long =
+        db.withTransaction {
+            // The same app (from the drawer, its home copy, or the dock row itself) never folds with
+            // itself: that made a folder of two rows of one app, shown as a folder of one.
+            if (dropped.key == target.key) return@withTransaction -1L
+            val targetRow = dockRow(target) ?: return@withTransaction -1L
+            val droppedRow = fromContainer?.let { dao.getByKey(it, dropped.packageName, dropped.className, dropped.userSerial) }
+            if (droppedRow?.id == targetRow.id) return@withTransaction -1L
+            val folderId = foldApps(targetRow, droppedRow, dropped, name)
+            repairSourceFolder(fromContainer)
+            renumberDock()
+            folderId
+        }
+
+    /** [app] dropped onto the dock folder [folderId]: joins it at the end (never twice), its row in
+     *  [fromContainer] (see [createDockFolder]) moving in. A drop from the folder onto itself does nothing. */
+    suspend fun addToDockFolder(app: AppItem, folderId: Long, fromContainer: Long?) = db.withTransaction {
+        if (fromContainer == folderId) return@withTransaction
+        if (dao.getById(folderId)?.isFolder != true) return@withTransaction
+        val row = fromContainer?.let { dao.getByKey(it, app.packageName, app.className, app.userSerial) }
+        joinFolder(folderId, row, app)
+        repairSourceFolder(fromContainer)
+        renumberDock()
+    }
+
+    /** A home folder dropped between dock tiles at [index] (see [addToDockAt]). False when
+     *  [folderId] is not a home folder. */
+    suspend fun moveFolderToDock(folderId: Long, index: Int, shownKeys: Set<String>? = null): Boolean =
+        db.withTransaction {
+            val folder = dao.getById(folderId) ?: return@withTransaction false
+            if (!folder.isFolder || folder.containerId != HOME) return@withTransaction false
+            dao.moveById(folderId, DOCK, 0, PARKED_SLOT, 0)
+            insertDockRow(dao.getById(folderId)!!, index, shownKeys)
+            true
+        }
+
+    /** A dock folder dropped on a home cell: moves there only while the cell is free (folders never
+     *  merge, and nothing is swapped into the dock); the dock closes the gap. False = nothing changed. */
+    suspend fun moveDockFolderToHome(folderId: Long, page: Int, cellX: Int, cellY: Int): Boolean =
+        db.withTransaction {
+            val folder = dao.getById(folderId) ?: return@withTransaction false
+            if (!folder.isFolder || folder.containerId != DOCK) return@withTransaction false
+            if (!isShownPage(page)) return@withTransaction false
+            val items = dao.getContainer(HOME)
+            if (dao.getAt(HOME, page, cellX, cellY) != null || cellInWidget(items, -1L, page, cellX, cellY)) {
+                return@withTransaction false
+            }
+            dao.moveById(folderId, HOME, page, cellX, cellY)
+            renumberDock()
+            true
+        }
+
+    private suspend fun dockRow(app: AppItem): HomeItemEntity? =
+        dao.getByKey(DOCK, app.packageName, app.className, app.userSerial)
+
+    /** After a child left [container] for the dock: a folder re-indexes and may dissolve. */
+    private suspend fun repairSourceFolder(container: Long?) {
+        if (container == null || container == HOME || container == DOCK) return
+        reindexFolder(container)
+        dissolveIfNeeded(container)
+    }
+
+    /** Slots [row] (already a dock row, anywhere) at the shown [index] — see [addToDockAt]. */
+    private suspend fun insertDockRow(row: HomeItemEntity, index: Int, shownKeys: Set<String>?) {
+        val rest = dao.getContainerOrdered(DOCK).filter { it.id != row.id }
+        val shown = rest.filter { it.isFolder || shownKeys == null || it.key in shownKeys }
+        val i = index.coerceIn(0, shown.size)
+        val at = if (i < shown.size) rest.indexOf(shown[i]) else shown.lastOrNull()?.let { rest.indexOf(it) + 1 } ?: 0
+        val order = rest.toMutableList().apply { add(at, row) }
+        writeDockOrder(order.map { it.id })
+    }
+
+    /** Numbers the dock rows 0..n-1 in their current order when any slot is off (a gap, a parked row). */
+    private suspend fun renumberDock() {
+        val rows = dao.getContainerOrdered(DOCK)
+        val numbered = rows.withIndex().all { (i, r) -> r.page == 0 && r.cellY == 0 && r.cellX == i }
+        if (!numbered) writeDockOrder(rows.map { it.id })
+    }
+
+    /** Puts the dock rows [ids] at slots 0..n-1 in that order, parking them first so the unique
+     *  (container, page, cell) index never trips mid-update. */
+    private suspend fun writeDockOrder(ids: List<Long>) {
+        ids.forEachIndexed { i, id -> dao.moveById(id, DOCK, 0, -2 - i, 0) }
+        ids.forEachIndexed { i, id -> dao.moveById(id, DOCK, 0, i, 0) }
+    }
+
+    private suspend fun reindexFolder(folderId: Long) {
+        val children = dao.getContainerOrdered(folderId)
+        children.forEachIndexed { i, child ->
+            if (child.cellX != i || child.cellY != 0 || child.page != 0) {
+                dao.moveById(child.id, folderId, 0, i, 0)
+            }
+        }
+    }
+
+    /** Collapses a folder once it holds a single app (move it out, to the folder's own cell or dock
+     *  slot) or none (delete the folder). A last app that already has its own icon in the folder's
+     *  container is dropped with the folder, leaving the folder's cell empty (the dock closes the gap). */
+    private suspend fun dissolveIfNeeded(folderId: Long) {
+        val children = dao.getContainerOrdered(folderId)
+        val folder = dao.getById(folderId)
+        when (children.size) {
+            0 -> dao.deleteById(folderId)
+            1 -> {
+                if (folder == null) return
+                val last = children.first()
+                dao.deleteById(folderId) // free the cell first
+                if (hasOwnRow(folder.containerId, last)) {
+                    dao.deleteById(last.id)
+                } else {
+                    dao.moveById(last.id, folder.containerId, folder.page, folder.cellX, folder.cellY)
+                }
+            }
+        }
+        if (folder?.containerId == DOCK && children.size <= 1) renumberDock()
+    }
+
+    /** True if [row] is an app that already has its own icon directly on the home screen. */
+    private suspend fun onHome(row: HomeItemEntity): Boolean = hasOwnRow(HOME, row)
+
+    /** True if [row] is an app that already has its own row directly in [container] (home or dock). */
+    private suspend fun hasOwnRow(container: Long, row: HomeItemEntity): Boolean =
+        row.isApp && dao.getByKey(container, row.packageName, row.className, row.userSerial) != null
+
+    /**
+     * Moves [source] to a target cell in the [HOME] container, swapping with the cell's occupant if
+     * any. Call inside a transaction: the swap parks [source] off-grid so the unique index holds.
+     * Returns false (no change) when the target is inside a widget's rectangle (bound OR a restored
+     * placeholder) or not on a page the pager shows ([isShownPage]) — the caller uses this to roll
+     * back its optimistic placement so the icon snaps back instead of ending up hidden under the
+     * widget or on the trailing page.
+     */
+    private suspend fun moveOrSwap(source: HomeItemEntity, page: Int, cellX: Int, cellY: Int): Boolean {
+        if (source.page == page && source.cellX == cellX && source.cellY == cellY) return true
+        if (!isShownPage(page)) return false
+        // Widgets occupy a rectangle and aren't swappable in MVP: cancel a drop onto/into one.
+        if (cellInWidget(dao.getContainer(HOME), source.id, page, cellX, cellY)) return false
+        val occupant = dao.getAt(HOME, page, cellX, cellY)
+        when {
+            occupant == null -> dao.moveById(source.id, HOME, page, cellX, cellY)
+            occupant.id == source.id -> Unit
+            else -> {
+                dao.moveById(source.id, HOME, TEMP_SLOT, TEMP_SLOT, TEMP_SLOT)
+                dao.moveById(occupant.id, HOME, source.page, source.cellX, source.cellY)
+                dao.moveById(source.id, HOME, page, cellX, cellY)
+            }
+        }
+        return true
+    }
+
+    private fun homeApp(app: AppItem, container: Long, page: Int, cellX: Int, cellY: Int) =
+        HomeItemEntity(
+            containerId = container,
+            packageName = app.packageName,
+            className = app.className,
+            userSerial = app.userSerial,
+            page = page,
+            cellX = cellX,
+            cellY = cellY,
+        )
+
+    /**
+     * True if (page,cellX,cellY) lies within any widget's rectangle in [items] (excluding [excludeId]).
+     * Covers bound widgets, restored-but-unbound placeholders AND built-in widgets ([HomeItemEntity.hasFootprint])
+     * — each still occupies its spanX×spanY footprint, so a drop must not land inside it (else the
+     * app hides under it / a swap corrupts the multi-cell row). `isWidget` alone missed placeholders.
+     */
+    private fun cellInWidget(items: List<HomeItemEntity>, excludeId: Long, page: Int, cellX: Int, cellY: Int): Boolean =
+        items.any {
+            it.id != excludeId && it.hasFootprint && it.page == page &&
+                cellX in it.cellX until (it.cellX + it.spanX) &&
+                cellY in it.cellY until (it.cellY + it.spanY)
+        }
+
+    private fun firstFreeCell(items: List<HomeItemEntity>, columns: Int, rows: Int): Triple<Int, Int, Int> =
+        firstFreeRect(items, columns, 1, 1, rows)
+
+    /** Applies a [PushPlacement]'s displacements: park off-grid first (unique temp cells) so the
+     *  unique (page,cellX,cellY) index can't be violated mid-update, then place at the final cells. */
+    private suspend fun applyPush(p: PushPlacement) {
+        if (p.moved.isEmpty()) return
+        var temp = -1
+        for (id in p.moved.keys) { dao.moveById(id, HOME, temp, temp, temp); temp-- }
+        for ((id, pos) in p.moved) dao.moveById(id, HOME, p.page, pos.first, pos.second)
+    }
+
+    /** Revalidate a user-selected drop after binding/configuration; never relocate it silently.
+     *  False — nothing stored — when the rectangle is not on a page the pager shows or nothing can
+     *  be pushed aside to free it. */
+    suspend fun addWidgetAt(
+        appWidgetId: Int?,
+        provider: String?,
+        builtinType: String?,
+        placement: com.kich.launcher.model.WidgetPlacement,
+        columns: Int,
+        rows: Int,
+    ): Boolean = db.withTransaction {
+        val items = dao.getContainer(HOME)
+        // A configuration result may be redelivered after process recreation.
+        if (appWidgetId != null && items.any { it.appWidgetId == appWidgetId }) return@withTransaction true
+        val p = placement
+        if (!isShownPage(p.page)) return@withTransaction false
+        val plan = ReorderPlanner.planFit(
+            items.map { ReorderPlanner.Rect(it.id, it.page, it.cellX, it.cellY, it.spanX, it.spanY) },
+            Long.MIN_VALUE, p.page, p.cellX, p.cellY, p.spanX, p.spanY, columns, rows,
+        ) ?: return@withTransaction false
+        var temp = -1
+        for (id in plan.keys) { dao.moveById(id, HOME, temp, temp, temp); temp-- }
+        for ((id, pos) in plan) dao.moveById(id, HOME, p.page, pos.first, pos.second)
+        dao.insert(HomeItemEntity(
+            containerId = HOME, page = p.page, cellX = p.cellX, cellY = p.cellY,
+            spanX = p.spanX, spanY = p.spanY, appWidgetId = appWidgetId,
+            widgetProvider = provider, builtinType = builtinType,
+        ))
+        true
+    }
+
+    /** Removes a placed widget row (the host id is freed by the caller). */
+    suspend fun removeWidget(rowId: Long) {
+        dao.deleteById(rowId)
+    }
+
+    /**
+     * Opens an empty page at index [at] by moving every home item on pages ≥ [at] one page to the
+     * right. Done in two hops through a far-away page range: a single "+1" update would trip the
+     * unique (container, page, cell) index while rows overtake the not-yet-moved ones.
+     */
+    suspend fun insertPage(at: Int) {
+        db.withTransaction {
+            dao.offsetPages(HOME, at, PAGE_SHIFT_HOP)
+            dao.offsetPages(HOME, at + PAGE_SHIFT_HOP, 1 - PAGE_SHIFT_HOP)
+        }
+    }
+
+    /**
+     * Removes page [page] and closes the gap. With [purge], rows still stored on the page are deleted
+     * first — the ones the home screen cannot show (an app the user disabled, a shortcut its app
+     * dropped, a widget whose provider is gone) and that would otherwise keep an empty-looking page
+     * alive forever. Rows hidden only for now (a paused work profile, an app on unmounted storage)
+     * come back by themselves, so they are never purged: the page stays and the result is false.
+     * Without [purge], false (and no change) when the page holds anything.
+     */
+    suspend fun removeEmptyPage(page: Int, purge: Boolean = false): Boolean = db.withTransaction {
+        if (purge) {
+            val folders = dao.folderIdsOnPage(HOME, page)
+            val rows = dao.getContainer(HOME).filter { it.page == page } + folders.flatMap { dao.getContainer(it) }
+            val owners = rows.filter { it.packageName.isNotEmpty() }.map { it.packageName to it.userSerial }.toSet()
+            if (owners.any { (pkg, serial) -> resolver.isTemporarilyUnavailable(pkg, serial) }) {
+                return@withTransaction false
+            }
+            // A pinned shortcut row goes only when the system says the shortcut is gone: while the
+            // launcher is not the default home (or the shortcut service is not ready) no shortcut
+            // renders, so a page of them looks empty although every one would show again.
+            val unconfirmed = rows.filter { it.containerId == HOME && it.shortcutId != null }
+                .groupBy { it.packageName to it.userSerial }
+                .any { (owner, shortcuts) ->
+                    val ids = shortcuts.map { it.shortcutId!! }
+                    !resolver.missingShortcuts(owner.first, owner.second, ids).containsAll(ids)
+                }
+            if (unconfirmed) return@withTransaction false
+            if (folders.isNotEmpty()) dao.deleteByContainers(folders)
+            dao.deleteOnPage(HOME, page)
+        } else if (dao.countOnPage(HOME, page) > 0) {
+            return@withTransaction false
+        }
+        dao.offsetPages(HOME, page + 1, PAGE_SHIFT_HOP)
+        dao.offsetPages(HOME, page + 1 + PAGE_SHIFT_HOP, -1 - PAGE_SHIFT_HOP)
+        true
+    }
+
+    /** Places a built-in widget (e.g. [HomeItemEntity.BUILTIN_SMARTSPACE]) at the first rectangle,
+     *  pushing overlapping icons aside before spilling onto a fresh page (see [firstRectWithPush]).
+     *  False — nothing stored, nothing moved — when every page the pager shows is full. */
+    suspend fun addBuiltin(type: String, spanX: Int, spanY: Int, columns: Int, rows: Int): Boolean =
+        db.withTransaction {
+            val placement = firstRectWithPush(dao.getContainer(HOME), columns, spanX, spanY, rows)
+            if (!isShownPage(placement.page)) return@withTransaction false
+            applyPush(placement)
+            val (page, x, y) = Triple(placement.page, placement.cellX, placement.cellY)
+            dao.insert(
+                HomeItemEntity(
+                    containerId = HOME,
+                    page = page, cellX = x, cellY = y,
+                    spanX = spanX.coerceIn(1, columns.coerceAtLeast(1)),
+                    spanY = spanY.coerceIn(1, rows.coerceAtLeast(1)),
+                    builtinType = type,
+                ),
+            )
+            true
+        }
+
+    /** True when nothing has ever been placed on the home surface (fresh install). */
+    suspend fun isHomeEmpty(): Boolean = dao.getContainer(HOME).isEmpty()
+
+    /**
+     * Turns bound widget rows whose device-local id is NOT in [validIds] back into unbound
+     * tap-to-set-up placeholders. After a Google Auto Backup / device-to-device restore the Room DB
+     * comes back with the OLD device's appWidgetIds — ids this host never allocated — which would
+     * otherwise render as invisible dead zones on the grid.
+     */
+    suspend fun unbindStaleWidgets(validIds: Set<Int>) {
+        db.withTransaction {
+            dao.getContainer(HOME).forEach { row ->
+                val id = row.appWidgetId
+                if (id != null && id !in validIds) dao.clearWidgetId(row.id)
+            }
+        }
+    }
+
+    /** Binds a restored widget placeholder row to a freshly allocated [appWidgetId] on this device,
+     *  turning it back into a live widget (its spanX/spanY were preserved from the backup). */
+    suspend fun bindRestoredWidget(rowId: Long, appWidgetId: Int): Boolean = db.withTransaction {
+        val row = dao.getById(rowId) ?: return@withTransaction false
+        if (row.widgetProvider == null || row.containerId != HOME) return@withTransaction false
+        dao.updateWidgetId(rowId, appWidgetId)
+        true
+    }
+
+    /** Device-local ids of all bound widgets, for reconciling leftover ids in the AppWidgetHost. */
+    suspend fun boundWidgetIds(): Set<Int> = dao.boundWidgetIds().toSet()
+
+    /** Atomically sets a widget row's full grid bounds (used by both move and resize). If the target
+     *  rect is occupied, the overlapping items are pushed aside to free cells on the same page
+     *  ([ReorderPlanner]); returns false (no change) if the row is gone, isn't a widget, or no
+     *  arrangement fits. */
+    suspend fun setWidgetBounds(
+        rowId: Long, page: Int, cellX: Int, cellY: Int, spanX: Int, spanY: Int, columns: Int, rows: Int,
+    ): Boolean = db.withTransaction {
+        val row = dao.getById(rowId) ?: return@withTransaction false
+        if (!row.isWidget && !row.isBuiltin) return@withTransaction false
+        if (!isShownPage(page)) return@withTransaction false
+        val sx = spanX.coerceAtLeast(1)
+        val sy = spanY.coerceAtLeast(1)
+        val items = dao.getContainer(HOME)
+        if (rectFitsForRow(items, rowId, page, cellX, cellY, sx, sy, columns, rows)) {
+            dao.moveById(rowId, HOME, page, cellX, cellY)
+            dao.updateSpans(rowId, sx, sy)
+            return@withTransaction true
+        }
+        // Target is occupied: try to push the overlapping items aside.
+        val cols = columns.coerceAtLeast(1)
+        val plan = ReorderPlanner.planFit(
+            items.map { ReorderPlanner.Rect(it.id, it.page, it.cellX, it.cellY, it.spanX, it.spanY) },
+            rowId, page, cellX, cellY, sx, sy, cols, rows.coerceAtLeast(1),
+        ) ?: return@withTransaction false
+        // Park the widget + every displaced item off-grid (unique temp cells) so the unique
+        // (page,cellX,cellY) index can't be violated mid-update, then place each at its final cell.
+        var temp = -1
+        dao.moveById(rowId, HOME, temp, temp, temp); temp--
+        for (id in plan.keys) { dao.moveById(id, HOME, temp, temp, temp); temp-- }
+        for ((id, pos) in plan) dao.moveById(id, HOME, page, pos.first, pos.second)
+        dao.moveById(rowId, HOME, page, cellX, cellY)
+        dao.updateSpans(rowId, sx, sy)
+        true
+    }
+
+    /**
+     * The once-per-launch ghost sweep (see [planSweep]): rows that never render still occupy their
+     * cells and silently block placement, resizes and moves with no visible reason. [isInstalled]
+     * must be fail-safe — answer true when unsure (locked profile, transient error) so a hiccup can
+     * never wipe real items. Every folder is repaired afterwards, including ones an older version
+     * left with one or no apps. Returns the number of rows deleted or re-pointed.
+     */
+    suspend fun removeStaleAppRows(isInstalled: (packageName: String, userSerial: Long) -> Boolean): Int =
+        db.withTransaction {
+            val plan = planSweep(dao.getAll(), isInstalled, resolver)
+            // Re-point first: dissolving a folder checks the home rows' final app keys.
+            plan.remap.forEach { (id, className) -> dao.updateClassName(id, className) }
+            plan.delete.forEach { dao.deleteById(it) }
+            repairFolders((dao.getContainer(HOME) + dao.getContainer(DOCK)).filter { it.isFolder }.map { it.id })
+            renumberDock()
+            plan.delete.size + plan.remap.size
+        }
+
+    /**
+     * Uninstall-event cleanup: every app/shortcut/folder-child row of [packageName] in the profile
+     * [userSerial], and — when that is the launcher's own profile, where its widgets are bound —
+     * every widget the package provided. Restored placeholders go as well: an uninstall is a
+     * deliberate removal, so the provider is no longer expected back, and a placeholder could never
+     * be set up again (its tap would silently do nothing). The host ids are freed by the caller.
+     * Built-ins and folder rows are never touched.
+     */
+    suspend fun removeAppRowsForPackage(packageName: String, userSerial: Long): Int =
+        db.withTransaction {
+            val all = dao.getAll()
+            val doomed = staleAppRowIds(all) { pkg, serial -> !(pkg == packageName && serial == userSerial) }.toHashSet()
+            val widgets = all.filter { it.widgetProvider?.substringBefore('/') == packageName }
+            if (widgets.isNotEmpty() && userSerial == resolver.ownUserSerial()) widgets.mapTo(doomed) { it.id }
+            deleteAndRepairFolders(all, doomed)
+        }
+
+    /**
+     * Shortcut-change cleanup for one app in one profile: deletes its home shortcut rows whose shortcut
+     * the system definitively no longer has (data cleared, app archived), as Launcher3's
+     * `ShortcutsChangedTask` does — the per-package slice of [planSweep], so a shortcut that vanishes
+     * while the launcher runs leaves no invisible but occupied cell until the next launch's sweep.
+     */
+    suspend fun removeMissingShortcuts(packageName: String, userSerial: Long): Int =
+        db.withTransaction {
+            val rows = dao.getContainer(HOME)
+                .filter { it.isShortcut && it.packageName == packageName && it.userSerial == userSerial }
+            if (rows.isEmpty()) return@withTransaction 0
+            val missing = resolver.missingShortcuts(packageName, userSerial, rows.mapNotNull { it.shortcutId }.distinct())
+            val doomed = rows.filter { it.shortcutId in missing }
+            doomed.forEach { dao.deleteById(it.id) }
+            doomed.size
+        }
+
+    /** Deletes [ids] (rows of [all]), repairs the folders they left and closes the dock's gaps. */
+    private suspend fun deleteAndRepairFolders(all: List<HomeItemEntity>, ids: Set<Long>): Int {
+        if (ids.isEmpty()) return 0
+        ids.forEach { dao.deleteById(it) }
+        repairFolders(
+            all.filter { it.id in ids && it.containerId != HOME && it.containerId != DOCK }.map { it.containerId }.distinct(),
+        )
+        renumberDock()
+        return ids.size
+    }
+
+    /** Restores the folder invariants a manual removal keeps: a cellX gap would collide with
+     *  addToFolder's childCount-as-index (unique cell index → SQLiteConstraintException), and a
+     *  folder left with 0–1 children must dissolve. */
+    private suspend fun repairFolders(folderIds: Collection<Long>) {
+        folderIds.forEach { folderId ->
+            reindexFolder(folderId)
+            dissolveIfNeeded(folderId)
+        }
+    }
+
+    companion object {
+        /** DEFAULT rows per home page — the live value is the user's homeRows setting (5..10);
+         *  this constant only backs default parameters and old backups without home_rows. */
+        const val ROWS = 6
+
+        /** Hard cap on home pages: the pager shows pages 0 until MAX_PAGES. Every path that stores
+         *  or moves a row keeps to those ([isShownPage]); restore alone still accepts index MAX_PAGES,
+         *  which older versions could write. */
+        const val MAX_PAGES = 50
+
+        /** Whether a row may be put on [page]: one of the MAX_PAGES pages the pager shows. Index
+         *  MAX_PAGES is only its trailing page — a drop target while dragging, the first page's copy
+         *  with infinite scroll — where an item placed at rest would never be seen. */
+        fun isShownPage(page: Int): Boolean = page in 0 until MAX_PAGES
+
+        /** Temporary page offset for the two-hop page shifts (well past any real page). */
+        private const val PAGE_SHIFT_HOP = 100_000
+
+        /**
+         * Plans a repack of the given HOME rows into a [columns]-wide grid, in reading order.
+         * Widgets keep their spanX×spanY footprint (shrunk to fit the new grid if needed) and the
+         * cells they cover are reserved, so no later item can be packed inside a widget's rectangle
+         * (the old 1×1-slot packing buried icons under widgets). Non-widget rows are always 1×1.
+         */
+        fun reflowPlan(rows: List<HomeItemEntity>, columns: Int, gridRows: Int = ROWS): List<ReflowPlacement> {
+            val cols = columns.coerceAtLeast(1)
+            val rws = gridRows.coerceAtLeast(1)
+            val placed = ArrayList<HomeItemEntity>(rows.size)
+            val plan = ArrayList<ReflowPlacement>(rows.size)
+            for (row in rows) {
+                val widget = row.hasFootprint
+                val sx = if (widget) row.spanX.coerceIn(1, cols) else 1
+                val sy = if (widget) row.spanY.coerceIn(1, rws) else 1
+                val (page, x, y) = firstFreeRect(placed, cols, sx, sy, rws)
+                plan += ReflowPlacement(row.id, page, x, y, sx, sy)
+                // Occupancy carrier for the next iteration's firstFreeRect scan.
+                placed += HomeItemEntity(page = page, cellX = x, cellY = y, spanX = sx, spanY = sy)
+            }
+            return plan
+        }
+
+        /** Off-grid parking slot used while swapping two cells inside a transaction. */
+        private const val TEMP_SLOT = -1
+
+        /** The dock slot a row waits at before [writeDockOrder] numbers it (below every parking slot). */
+        private const val PARKED_SLOT = -100_000
+
+        /** Pure selection for [removeStaleAppRows]: plain app rows, pinned-shortcut rows and folder
+         *  children whose (package, profile) fails [isInstalled] — never widget/builtin/folder rows. */
+        fun staleAppRowIds(
+            items: List<HomeItemEntity>,
+            isInstalled: (packageName: String, userSerial: Long) -> Boolean,
+        ): List<Long> {
+            val verdict = HashMap<Pair<String, Long>, Boolean>()
+            return items.filter { row ->
+                row.folderName == null && row.builtinType == null && row.widgetProvider == null &&
+                    row.packageName.isNotEmpty() &&
+                    !verdict.getOrPut(row.packageName to row.userSerial) {
+                        isInstalled(row.packageName, row.userSerial)
+                    }
+            }.map { it.id }
+        }
+
+        /**
+         * Pure decision behind [removeStaleAppRows]:
+         *  - rows of an uninstalled app or shortcut ([staleAppRowIds]) go, unless the app is only
+         *    hidden for now (an app on unmounted storage reads as "not installed");
+         *  - an app row whose launcher activity is gone although its package is installed and
+         *    enabled (renamed, or an in-app icon chooser switched activity-aliases) follows the
+         *    package's single launcher activity; with none or several there is no right icon and
+         *    the row goes, as in Launcher3. Disabled apps answer [PackageTargets.Unknown] and stay;
+         *  - a pinned shortcut goes only when the system definitively no longer has it; one inside a
+         *    folder always goes (folders render only apps, so it is an invisible extra child);
+         *  - one row per app per container: an untouched row beats a re-pointed one, then the
+         *    lowest id. The same app on home AND inside a folder is legitimate and kept.
+         */
+        internal fun planSweep(
+            items: List<HomeItemEntity>,
+            isInstalled: (packageName: String, userSerial: Long) -> Boolean,
+            resolver: AppRowResolver,
+        ): SweepPlan {
+            val byId = items.associateBy { it.id }
+            val hiddenForNow = HashMap<Pair<String, Long>, Boolean>()
+            val delete = staleAppRowIds(items, isInstalled).filterTo(HashSet()) { id ->
+                val row = byId.getValue(id)
+                !hiddenForNow.getOrPut(row.packageName to row.userSerial) {
+                    resolver.isTemporarilyUnavailable(row.packageName, row.userSerial)
+                }
+            }
+            val targets = HashMap<Pair<String, Long>, PackageTargets>()
+            val remap = HashMap<Long, String>()
+            for (row in items) {
+                if (!row.isApp || row.id in delete) continue
+                val now = targets.getOrPut(row.packageName to row.userSerial) {
+                    resolver.launchTargets(row.packageName, row.userSerial)
+                }
+                if (now !is PackageTargets.Launchable || row.className in now.classNames) continue
+                val only = now.classNames.singleOrNull()
+                if (only != null) remap[row.id] = only else delete += row.id
+            }
+            val shortcuts = items.filter { it.isShortcut && it.packageName.isNotEmpty() && it.id !in delete }
+            shortcuts.filter { it.containerId != HOME }.forEach { delete += it.id }
+            shortcuts.filter { it.containerId == HOME }
+                .groupBy { it.packageName to it.userSerial }
+                .forEach { (owner, rows) ->
+                    val ids = rows.mapNotNull { it.shortcutId }.distinct()
+                    val missing = resolver.missingShortcuts(owner.first, owner.second, ids)
+                    rows.filter { it.shortcutId in missing }.forEach { delete += it.id }
+                }
+            items.filter { it.isApp && it.id !in delete }
+                .groupBy { "${it.containerId}|${it.packageName}/${remap[it.id] ?: it.className}/${it.userSerial}" }
+                .values
+                .forEach { rows ->
+                    rows.sortedWith(compareBy({ it.id in remap }, { it.id })).drop(1).forEach { delete += it.id }
+                }
+            return SweepPlan(delete, remap.filterKeys { it !in delete })
+        }
+
+        /** True if a [spanX]×[spanY] rect at (page,cellX,cellY) is on-grid and free of every item
+         *  except [excludeRowId] (so a widget never blocks its own move/resize). */
+        fun rectFitsForRow(
+            items: List<HomeItemEntity>, excludeRowId: Long,
+            page: Int, cellX: Int, cellY: Int, spanX: Int, spanY: Int, columns: Int, rows: Int = ROWS,
+        ): Boolean {
+            val cols = columns.coerceAtLeast(1)
+            if (cellX < 0 || cellY < 0 || cellX + spanX > cols || cellY + spanY > rows.coerceAtLeast(1)) return false
+            val occupied = HashSet<Triple<Int, Int, Int>>()
+            for (e in items) if (e.id != excludeRowId) for (dx in 0 until e.spanX) for (dy in 0 until e.spanY) {
+                occupied += Triple(e.page, e.cellX + dx, e.cellY + dy)
+            }
+            for (dx in 0 until spanX) for (dy in 0 until spanY) {
+                if (Triple(page, cellX + dx, cellY + dy) in occupied) return false
+            }
+            return true
+        }
+
+        /**
+         * First top-left cell where a [spanX]×[spanY] rectangle fits on the home grid without
+         * overlapping any item (each item occupies its own spanX×spanY cells; apps/folders/shortcuts
+         * are 1×1). Spans are clamped to the grid; advances to a fresh trailing page when needed.
+         */
+        /**
+         * Like [firstFreeRect], but before exiling the rect to a fresh page it tries to PUSH items
+         * aside on the existing pages ([ReorderPlanner.planFit], the same plan move/resize commits).
+         * A full-width widget can only start at column 0, so without this a single icon on a row
+         * disqualifies the whole row and a picker add silently lands on a page the user isn't
+         * looking at — the "the clock won't install" report.
+         */
+        fun firstRectWithPush(
+            items: List<HomeItemEntity>, columns: Int, spanX: Int, spanY: Int, rows: Int = ROWS,
+        ): PushPlacement {
+            val cols = columns.coerceAtLeast(1)
+            val rws = rows.coerceAtLeast(1)
+            val sx = spanX.coerceIn(1, cols)
+            val sy = spanY.coerceIn(1, rws)
+            val free = firstFreeRect(items, cols, sx, sy, rws)
+            val maxPage = items.filter { it.page >= 0 }.maxOfOrNull { it.page } ?: -1
+            if (free.first <= maxPage) {
+                return PushPlacement(free.first, free.second, free.third, emptyMap())
+            }
+            val rects = items.map { ReorderPlanner.Rect(it.id, it.page, it.cellX, it.cellY, it.spanX, it.spanY) }
+            for (page in 0..maxPage) {
+                for (y in 0..rws - sy) for (x in 0..cols - sx) {
+                    val plan = ReorderPlanner.planFit(rects, NO_ROW, page, x, y, sx, sy, cols, rws)
+                    if (plan != null) return PushPlacement(page, x, y, plan)
+                }
+            }
+            return PushPlacement(free.first, free.second, free.third, emptyMap())
+        }
+
+        /** A row id no real row carries — excludes nothing from [ReorderPlanner.planFit]'s collisions. */
+        private const val NO_ROW = -1L
+
+        fun firstFreeRect(items: List<HomeItemEntity>, columns: Int, spanX: Int, spanY: Int, rows: Int = ROWS): Triple<Int, Int, Int> {
+            val cols = columns.coerceAtLeast(1)
+            val rws = rows.coerceAtLeast(1)
+            val sx = spanX.coerceIn(1, cols)
+            val sy = spanY.coerceIn(1, rws)
+            val occupied = HashSet<Triple<Int, Int, Int>>()
+            for (e in items) for (dx in 0 until e.spanX) for (dy in 0 until e.spanY) {
+                occupied += Triple(e.page, e.cellX + dx, e.cellY + dy)
+            }
+            var page = 0
+            while (true) {
+                for (y in 0..rws - sy) for (x in 0..cols - sx) {
+                    val fits = (0 until sx).all { dx -> (0 until sy).all { dy -> Triple(page, x + dx, y + dy) !in occupied } }
+                    if (fits) return Triple(page, x, y)
+                }
+                page++
+            }
+        }
+    }
+}

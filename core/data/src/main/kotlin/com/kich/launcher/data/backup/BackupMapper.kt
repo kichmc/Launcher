@@ -1,0 +1,306 @@
+package com.kich.launcher.data.backup
+
+import com.kich.launcher.data.HomeLayoutRepository
+import com.kich.launcher.data.SettingsRepository
+import com.kich.launcher.data.local.HomeItemEntity
+
+data class RestoreMapping(val entities: List<HomeItemEntity>, val skipped: Int)
+
+/** The launchable apps of one profile: "package/class" keys and their packages. */
+data class ProfileApps(val appKeys: Set<String>, val packages: Set<String>)
+
+object BackupMapper {
+
+    fun toBackupItems(entities: List<HomeItemEntity>, mainUserSerial: Long): List<BackupItem> =
+        entities.map { e ->
+            BackupItem(
+                id = e.id,
+                containerId = e.containerId,
+                folderName = e.folderName,
+                packageName = e.packageName,
+                className = e.className,
+                // The serial is device-local; the backup records only "belongs to the profile the
+                // launcher runs as". Comparing against a literal 0 broke every secondary-user
+                // install (all items exported as non-main and dropped on restore).
+                mainProfile = e.userSerial == mainUserSerial,
+                shortcutId = e.shortcutId,
+                page = e.page,
+                cellX = e.cellX,
+                cellY = e.cellY,
+                // Widgets record their size + provider; the device-local appWidgetId is NOT backed up.
+                spanX = e.spanX,
+                spanY = e.spanY,
+                widgetProvider = e.widgetProvider,
+                builtinType = e.builtinType,
+            )
+        }
+
+    /**
+     * Maps backup items to DB rows, dropping anything that cannot restore safely. The backup file
+     * is plaintext JSON the user can edit (and Drive/storage can corrupt), so beyond "is the app
+     * installed" this validates the full item graph: real grid bounds for [columns]×ROWS, whole
+     * spanX×spanY footprints (a start-cell-only check let a restored widget cover other items),
+     * folder children against surviving folder rows, known builtin types, well-formed widget
+     * providers, and one instance per app per container. [widgetPackages] covers widget-only apps
+     * that have no launcher activity and so are absent from [installedPackages]. A pinned shortcut
+     * listed in [missingShortcuts] (package to shortcut id) is one the system no longer has here.
+     */
+    fun toEntities(
+        items: List<BackupItem>,
+        mainUserSerial: Long,
+        installedAppKeys: Set<String>,
+        installedPackages: Set<String>,
+        widgetPackages: Set<String>,
+        columns: Int,
+        gridRows: Int = HomeLayoutRepository.ROWS,
+        missingShortcuts: Set<Pair<String, String>> = emptySet(),
+    ): RestoreMapping {
+        val cols = columns.coerceIn(SettingsRepository.MIN_COLUMNS, SettingsRepository.MAX_COLUMNS)
+        val rows = gridRows.coerceIn(SettingsRepository.MIN_ROWS, SettingsRepository.MAX_ROWS)
+        val kept = ArrayList<HomeItemEntity>()
+        var skipped = 0
+        val seenIds = HashSet<Long>()
+        val seenAppKeys = HashSet<String>()
+        val occupied = HashSet<Triple<Int, Int, Int>>()
+        val keptFolderIds = HashSet<Long>()
+
+        val (topItems, childItems) = items.partition { it.containerId == HomeItemEntity.HOME || it.containerId == HomeItemEntity.DOCK }
+
+        for (it in topItems) {
+            val inDock = it.containerId == HomeItemEntity.DOCK
+            val keep = when {
+                // The dock holds apps and folders only (format 4+); its slots are renumbered below.
+                inDock && (it.builtinType != null || it.widgetProvider != null || it.shortcutId != null) -> false
+                it.builtinType != null -> it.builtinType in KNOWN_BUILTINS
+                it.widgetProvider != null -> {
+                    val pkg = it.widgetProvider.substringBefore('/')
+                    val cls = it.widgetProvider.substringAfter('/', "")
+                    pkg.isNotBlank() && cls.isNotBlank() &&
+                        (pkg in installedPackages || pkg in widgetPackages)
+                }
+                it.folderName != null -> true
+                !it.mainProfile -> false                                        // v1: main profile only
+                it.shortcutId != null ->                                        // pinned shortcut
+                    it.packageName in installedPackages && (it.packageName to it.shortcutId) !in missingShortcuts
+                else -> "${it.packageName}/${it.className}" in installedAppKeys // app
+            }
+            if (!keep) { skipped++; continue }
+            if (it.id in seenIds) { skipped++; continue }
+            val plainApp = it.builtinType == null && it.widgetProvider == null &&
+                it.folderName == null && it.shortcutId == null
+            val appKey = "${it.containerId}/${it.packageName}/${it.className}"
+            if (plainApp && appKey in seenAppKeys) { skipped++; continue }
+            if (inDock) {
+                if (it.cellX < 0) { skipped++; continue }
+                seenIds.add(it.id)
+                if (plainApp) seenAppKeys.add(appKey)
+                if (it.folderName != null) keptFolderIds.add(it.id)
+                kept.add(entity(it, mainUserSerial, 1, 1))
+                continue
+            }
+            // Only widgets (app or built-in) have a real footprint; an oversized span shrinks to
+            // the grid (the normal add path does the same) but a bad POSITION is rejected below.
+            val footprint = it.widgetProvider != null || it.builtinType != null
+            val spanX = if (footprint) it.spanX.coerceIn(1, cols) else 1
+            val spanY = if (footprint) it.spanY.coerceIn(1, rows) else 1
+            val inGrid = it.page in 0..HomeLayoutRepository.MAX_PAGES &&
+                it.cellX >= 0 && it.cellY >= 0 &&
+                it.cellX + spanX <= cols && it.cellY + spanY <= rows
+            if (!inGrid) { skipped++; continue }
+            val cells = ArrayList<Triple<Int, Int, Int>>(spanX * spanY)
+            for (x in it.cellX until it.cellX + spanX) {
+                for (y in it.cellY until it.cellY + spanY) cells.add(Triple(it.page, x, y))
+            }
+            if (cells.any { c -> c in occupied }) { skipped++; continue }
+            // Claim ids/keys/cells only for a KEPT item — a rejected item must not block a later
+            // valid one from restoring under the same app key or id.
+            seenIds.add(it.id)
+            if (plainApp) seenAppKeys.add(appKey)
+            occupied.addAll(cells)
+            if (it.folderName != null) keptFolderIds.add(it.id)
+            kept.add(entity(it, mainUserSerial, spanX, spanY))
+        }
+
+        // Folder children: only rows whose parent folder survived (an orphan is an invisible row
+        // that still blocks cells); cellX is the in-folder order index, not a grid coordinate.
+        val seenChildCells = HashSet<List<Long>>()
+        for (it in childItems) {
+            val keep = when {
+                it.containerId !in keptFolderIds -> false
+                it.builtinType != null || it.widgetProvider != null || it.folderName != null -> false
+                !it.mainProfile -> false
+                // Folders render only apps: a shortcut child would be an invisible extra child.
+                it.shortcutId != null -> false
+                else -> "${it.packageName}/${it.className}" in installedAppKeys
+            }
+            if (!keep) { skipped++; continue }
+            if (it.id in seenIds) { skipped++; continue }
+            val appKey = "${it.containerId}/${it.packageName}/${it.className}"
+            if (appKey in seenAppKeys) { skipped++; continue }
+            val sane = it.page in 0..HomeLayoutRepository.MAX_PAGES &&
+                it.cellX in 0..MAX_CHILD_INDEX && it.cellY in 0..MAX_CHILD_INDEX
+            if (!sane) { skipped++; continue }
+            if (!seenChildCells.add(listOf(it.containerId, it.page.toLong(), it.cellX.toLong(), it.cellY.toLong()))) {
+                skipped++; continue
+            }
+            seenIds.add(it.id)
+            seenAppKeys.add(appKey)
+            kept.add(entity(it, mainUserSerial, 1, 1))
+        }
+
+        // Mirror HomeLayoutRepository.reindexFolder: a child dropped above leaves a cellX gap, and
+        // addToFolder's childCount-as-index then lands on an occupied cell (unique cell index →
+        // SQLiteConstraintException). Re-number every folder's survivors 0…n−1 in reading order.
+        val childOrder = HashMap<Long, Int>()
+        kept.filter { it.isChild }
+            .groupBy { it.containerId }
+            .values.forEach { children ->
+                children.sortedWith(compareBy({ it.page }, { it.cellY }, { it.cellX }))
+                    .forEachIndexed { i, child -> childOrder[child.id] = i }
+            }
+        kept.replaceAll { e ->
+            val order = childOrder[e.id]
+            if (order == null) e else e.copy(page = 0, cellX = order, cellY = 0)
+        }
+
+        // Mirror HomeLayoutRepository.dissolveIfNeeded for the ONE write path that can produce an
+        // under-filled folder (children dropped above as uninstalled): a folder restored with zero
+        // children would be stuck on the grid forever — folders have no delete affordance and an
+        // empty one has nothing to long-press — and a single-child folder dissolves to that app on
+        // the folder's own cell (or dock slot), exactly like the live paths. Also like
+        // dissolveIfNeeded, a last child whose app already has its own row in the folder's container
+        // goes with the folder (two rows of one app in a container break drag and remove) and the
+        // folder's cell stays empty.
+        val childCounts = kept.filter { it.isChild }.groupingBy { it.containerId }.eachCount()
+        // Grows as children are promoted: two dissolving folders holding the same app would otherwise
+        // both put it in the container, and two rows of one app there break drag and remove.
+        val ownKeys = HashMap<Long, HashSet<String>>()
+        kept.filter { !it.isChild && it.isApp }.forEach { ownKeys.getOrPut(it.containerId) { HashSet() }.add(it.key) }
+        val dissolving = HashMap<Long, HomeItemEntity>()
+        val dropped = HashSet<Long>()
+        for (folder in kept) {
+            if (folder.folderName == null) continue
+            when (childCounts[folder.id] ?: 0) {
+                0 -> { dropped.add(folder.id); skipped++ }
+                1 -> { dissolving[folder.id] = folder; skipped++ }
+            }
+        }
+        if (dropped.isEmpty() && dissolving.isEmpty()) return RestoreMapping(renumberDock(kept), skipped)
+        val entities = kept.mapNotNull { e ->
+            val folder = dissolving[e.containerId]
+            when {
+                e.folderName != null && (e.id in dropped || e.id in dissolving) -> null
+                folder != null && !ownKeys.getOrPut(folder.containerId) { HashSet() }.add(e.key) -> { skipped++; null }
+                folder != null ->
+                    e.copy(containerId = folder.containerId, page = folder.page, cellX = folder.cellX, cellY = folder.cellY)
+                else -> e
+            }
+        }
+        return RestoreMapping(renumberDock(entities), skipped)
+    }
+
+    /** A row inside a folder (not on home, not in the dock). */
+    private val HomeItemEntity.isChild: Boolean
+        get() = containerId != HomeItemEntity.HOME && containerId != HomeItemEntity.DOCK
+
+    /** The dock rows at slots 0..n-1 in their file order (a dropped row or a hand-edited file leaves gaps). */
+    private fun renumberDock(entities: List<HomeItemEntity>): List<HomeItemEntity> {
+        val slots = entities.filter { it.containerId == HomeItemEntity.DOCK }
+            .sortedWith(compareBy({ it.page }, { it.cellY }, { it.cellX }))
+            .withIndex().associate { (i, row) -> row.id to i }
+        if (slots.isEmpty()) return entities
+        return entities.map { e -> slots[e.id]?.let { slot -> e.copy(page = 0, cellX = slot, cellY = 0) } ?: e }
+    }
+
+    /**
+     * The dock of a file written before format 4: its `dock_favorites` key list (app keys in slot
+     * order, already remapped to this device's profile [mainUserSerial]) as dock rows for the apps
+     * installed here ([installedAppKeys]: "package/class"). Ids are left to the database.
+     */
+    fun legacyDockEntities(favorites: String, mainUserSerial: Long, installedAppKeys: Set<String>): List<HomeItemEntity> =
+        favorites.split('\n')
+            .filter { it.isNotEmpty() }
+            .distinct()
+            .mapNotNull { key ->
+                val parts = key.split('/')
+                if (parts.size != 3 || parts[2].toLongOrNull() != mainUserSerial) return@mapNotNull null
+                if ("${parts[0]}/${parts[1]}" !in installedAppKeys) return@mapNotNull null
+                parts[0] to parts[1]
+            }
+            .mapIndexed { slot, (pkg, cls) ->
+                HomeItemEntity(
+                    containerId = HomeItemEntity.DOCK, packageName = pkg, className = cls, userSerial = mainUserSerial,
+                    page = 0, cellX = slot, cellY = 0,
+                )
+            }
+
+    /** The apps of [installedApps] (AppItem keys, "package/class/userSerial") that live in the
+     *  profile [userSerial]. Restored rows become rows of that one profile, so an app installed only
+     *  in another profile (a work copy) must not count as installed. */
+    fun installedInProfile(installedApps: Collection<String>, userSerial: Long): ProfileApps {
+        val keys = installedApps.mapNotNull { key ->
+            val parts = key.split('/')
+            if (parts.size == 3 && parts[2].toLongOrNull() == userSerial) parts[0] to parts[1] else null
+        }
+        return ProfileApps(keys.map { "${it.first}/${it.second}" }.toSet(), keys.map { it.first }.toSet())
+    }
+
+    /**
+     * The backed-up settings with their app keys (dock, hidden apps, custom labels, drawer folders,
+     * the left-swipe app) moved to this device's profile [targetMainSerial] — the same remapping the
+     * home rows get: keys of the profile the exporting launcher ran as follow it, keys of any other
+     * profile are dropped (serials are device-local, and a stale one could name a different profile
+     * here). [sourceMainSerial] is null in older files, and the keys can't tell it — a cleared dock
+     * plus one hidden work app would make the work profile look like the main one — so such files
+     * import exactly as before, unmapped. Unparseable keys are left as they are.
+     */
+    fun remapSettingsProfiles(settings: Map<String, Any>, sourceMainSerial: Long?, targetMainSerial: Long): Map<String, Any> {
+        val appKeyValues = settings.filter { (name, value) -> name in SettingsRepository.PROFILE_KEYED_PREFS && value is String }
+        val source = sourceMainSerial ?: return settings
+        return settings.mapValues { (name, value) ->
+            if (name !in appKeyValues) {
+                value
+            } else {
+                SettingsRepository.rewriteAppKeys(name, value as String) { key ->
+                    val slash = key.lastIndexOf('/')
+                    when (if (slash > 0) key.substring(slash + 1).toLongOrNull() else null) {
+                        null -> key
+                        source -> key.substring(0, slash + 1) + targetMainSerial
+                        else -> null
+                    }
+                }
+            }
+        }
+    }
+
+    private fun entity(it: BackupItem, mainUserSerial: Long, spanX: Int, spanY: Int) = HomeItemEntity(
+        id = it.id,
+        containerId = it.containerId,
+        folderName = it.folderName,
+        packageName = it.packageName,
+        className = it.className,
+        userSerial = if (it.folderName != null || it.builtinType != null) 0L else mainUserSerial,
+        shortcutId = it.shortcutId,
+        page = it.page,
+        cellX = it.cellX,
+        cellY = it.cellY,
+        spanX = spanX,
+        spanY = spanY,
+        // Restored widgets come back unbound (no device-local id yet); the home screen re-binds
+        // each via a tap-to-set-up placeholder. Non-widget rows keep provider null.
+        appWidgetId = null,
+        widgetProvider = it.widgetProvider,
+        builtinType = it.builtinType,
+    )
+
+    /** The builtin types this version can render — anything else in a file must not restore. */
+    private val KNOWN_BUILTINS = setOf(
+        HomeItemEntity.BUILTIN_SMARTSPACE,
+        HomeItemEntity.BUILTIN_NOTIFICATIONS,
+        HomeItemEntity.BUILTIN_BATTERY,
+        HomeItemEntity.BUILTIN_PEOPLE,
+    )
+
+    /** Upper bound for folder-child order indices (roomy; children index by cellX). */
+    private const val MAX_CHILD_INDEX = 999
+}

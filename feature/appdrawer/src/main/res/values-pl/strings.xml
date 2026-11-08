@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_drawer_search_hint">Szukaj aplikacji</string>
+    <string name="add_to_dock">Dodaj do Docka</string>
+    <string name="remove_from_dock">Usuń z Docka</string>
+    <string name="add_to_home">Dodaj do ekranu głównego</string>
+    <string name="remove_from_home">Usuń z ekranu głównego</string>
+    <string name="app_info">Informacje o aplikacji</string>
+    <string name="hide_app">Ukryj aplikację</string>
+    <string name="rename">Edytuj</string>
+    <string name="uninstall">Odinstaluj</string>
+    <string name="folder_name_label">Nazwa folderu</string>
+    <string name="folder_add_apps">Dodaj aplikacje</string>
+    <string name="folder_delete">Usuń folder</string>
+    <string name="folder_remove_hint">Przytrzymaj aplikację, aby usunąć ją z folderu</string>
+    <string name="folder_add">Dodaj</string>
+    <string name="folder_cancel">Anuluj</string>
+    <string name="folder_card_empty">Pusty folder. Przytrzymaj go, aby dodać aplikacje.</string>
+    <string name="folder_delete_title">Usunąć folder?</string>
+    <string name="folder_delete_text">„%1$s” zostanie usunięty. Jego aplikacje pozostaną na liście aplikacji.</string>
+    <string name="folder_delete_confirm">Usuń</string>
+    <string name="folder_move_earlier">Przesuń folder wcześniej</string>
+    <string name="folder_move_later">Przesuń folder później</string>
+    <string name="folder_edit">Edytuj folder</string>
+    <string name="folder_move_label">Przenieś folder</string>
+    <string name="search_section_apps">Aplikacje</string>
+    <string name="search_section_settings">Ustawienia</string>
+    <string name="search_section_contacts">Kontakty</string>
+    <string name="search_calc_copied">Skopiowano do schowka</string>
+    <string name="search_contact_call">Zadzwoń</string>
+    <string name="search_contact_message">Wiadomość</string>
+    <string name="drawer_frequent_apps">Najczęściej używane</string>
+    <string name="search_clear">Wyczyść wyszukiwanie</string>
+    <string name="search_no_results">Nie znaleziono wyników</string>
+    <string name="drawer_tab_personal">Osobiste</string>
+    <string name="drawer_tab_work">Służbowe</string>
+    <string name="work_apps_pause">Wstrzymaj aplikacje służbowe</string>
+    <string name="work_apps_unpause">Wznów</string>
+    <string name="work_apps_paused_title">Aplikacje służbowe są wstrzymane</string>
+    <string name="work_apps_paused_body">Aplikacje służbowe nie mogą wysyłać powiadomień, korzystać z baterii ani uzyskiwać dostępu do twojej lokalizacji.</string>
+</resources>

@@ -1,1 +1,183 @@
-# Launcher
+# ARK-launcher
+
+[![Latest release](https://img.shields.io/github/v/release/jrs8205/ARK-launcher?sort=semver)](https://github.com/jrs8205/ARK-launcher/releases/latest)
+[![F-Droid](https://img.shields.io/f-droid/v/com.kich.launcher)](https://f-droid.org/packages/com.kich.launcher/)
+[![Aptoide](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fws75.aptoide.com%2Fapi%2F7%2Fapp%2FgetMeta%3Fpackage_name%3Dcom.kich.launcher&query=%24.data.file.vername&label=Aptoide&prefix=v)](https://ark-launcher.en.aptoide.com/app)
+[![APKPure](https://img.shields.io/badge/APKPure-available-blue)](https://apkpure.com/p/com.kich.launcher)
+[![SourceForge](https://img.shields.io/badge/SourceForge-mirror-blue)](https://sourceforge.net/projects/ark-launcher/)
+[![License: Apache-2.0](https://img.shields.io/github/license/jrs8205/ARK-launcher)](LICENSE)
+[![Downloads](https://img.shields.io/github/downloads/jrs8205/ARK-launcher/total)](https://github.com/jrs8205/ARK-launcher/releases)
+[![Built with Jetpack Compose](https://img.shields.io/badge/Built%20with-Jetpack%20Compose-4285F4)](https://developer.android.com/jetpack/compose)
+
+A modern, lightweight Android home-screen launcher built entirely with **Jetpack Compose**.
+It speaks **English, Finnish, German, Spanish, French, Polish, Portuguese, Russian, Swedish and Turkish**
+(English is the fallback) and shares the visual identity of the
+**Arkikeskus** app, but works as a standalone launcher for anyone.
+
+> Status: early but daily-driven. Built from scratch on a current Kotlin/Compose stack.
+
+📖 **New here?** The **[Wiki](https://github.com/jrs8205/ARK-launcher/wiki)** has the full user guide —
+[setup](https://github.com/jrs8205/ARK-launcher/wiki/Getting-Started),
+[features](https://github.com/jrs8205/ARK-launcher/wiki/Features),
+[icon packs](https://github.com/jrs8205/ARK-launcher/wiki/Icon-Packs),
+[backup](https://github.com/jrs8205/ARK-launcher/wiki/Backup-and-Restore) and a
+[FAQ](https://github.com/jrs8205/ARK-launcher/wiki/FAQ).
+
+## Screenshots
+
+<p align="center">
+  <img src="docs/screenshots/home.png" width="24%" alt="Home screen with a widget" />
+  <img src="docs/screenshots/drawer.png" width="24%" alt="App drawer with search" />
+  <img src="docs/screenshots/widgets.png" width="24%" alt="Widget picker with search" />
+  <img src="docs/screenshots/settings.png" width="24%" alt="Settings" />
+</p>
+
+## Download
+
+Download the latest signed APK from the
+[**Releases**](https://github.com/jrs8205/ARK-launcher/releases/latest) page and open it on
+your device to install. To update, install the newer APK from the same page (Settings ▸ Updates ▸
+"Check for updates" opens it), or let Obtainium do it for you (below). Every release is also
+mirrored on [**SourceForge**](https://sourceforge.net/projects/ark-launcher/).
+
+ARK-launcher is also on [**F-Droid**](https://f-droid.org/packages/com.kich.launcher/).
+F-Droid builds it from source and ships the same signed APK as GitHub, so you can switch between
+them without reinstalling. New versions reach F-Droid a few days after GitHub.
+
+Requires **Android 11 (API 30)** or newer.
+
+**Registered with Google.** The package name and signing key are registered in Google's Android
+Developer Console, so the app keeps installing as usual under Google's new [sideloading
+rules](https://developer.android.com/developer-verification).
+
+### Auto-updates with Obtainium
+
+Prefer an app-store-style experience with automatic updates? Install
+[**Obtainium**](https://github.com/ImranR98/Obtainium) and add this repository as an app source:
+
+```
+https://github.com/jrs8205/ARK-launcher
+```
+
+Obtainium watches the Releases page and updates the launcher for you.
+
+## Feedback & questions
+
+Questions, ideas, and general chat are all welcome in
+[**GitHub Discussions**](https://github.com/jrs8205/ARK-launcher/discussions) or the
+[**r/ArkLauncher**](https://www.reddit.com/r/ArkLauncher/) community — in English or Finnish; release
+news goes out on the [**Telegram channel**](https://t.me/ARKLauncherUpdates).
+Found a bug? Please [open an issue](https://github.com/jrs8205/ARK-launcher/issues) instead.
+Discussions, the channel and Reddit are also linked in the app: **Settings ▸ Feedback**.
+
+## Features
+
+- **Paged home screen** with free icon placement and smooth drag-and-drop — move icons within a
+  page, across pages, and between the home grid and the dock. Drag an app from the drawer straight
+  onto any page.
+- **Dock** of favorite apps and folders (reorder, drag in/out; drop an app onto a dock app to make a folder).
+- **Swipe up from the dock** to open the app drawer, as from anywhere on the home screen.
+- **App drawer with universal search** — one search box finds:
+  - installed **apps**,
+  - common **system settings** pages (type "wifi", "battery", …),
+  - **contacts** (opt-in; gated by a setting + the `READ_CONTACTS` permission),
+  - a **calculator / unit converter** (type `12*7` or `100 cm to in`).
+  - plus an optional **most-used apps** row.
+- **Home-screen widgets** — browse large previews, tap Add or drag a preview onto the home screen.
+  Long-press and continue dragging to move a widget; hold at a screen edge to change pages.
+  Resize handles show the footprint and respect the widget's size limits; compatible widgets can
+  stretch to full width or be reconfigured. Collection widgets (e.g. chat lists) scroll in place.
+  Built-in clock (with the next event, alarm and optional weather), battery and notification
+  widgets adapt to their size and offer translucent or themed backgrounds in Home screen settings.
+- **Folders** on the home screen and inside the drawer: a tap opens a folder to look, a pencil opens its editor.
+- **Notification dots / badges** (via a notification-listener service; dot or Nova-style count).
+- **People widget**: messages, missed calls and mail grouped by person as tiles, with optional
+  batch delivery that holds others' messages in the launcher's widgets, badges and status bar until
+  set times. Android notifications, sounds and pop-ups remain active; new messages from pinned
+  people, missed calls and recognized one-time codes bypass the batch.
+- **Page menu**: add a page to the left or right, set the home page, remove an empty page.
+- **Material You themed icons** (monochrome, on supported Android versions), optionally for
+  **every app** (apps without a themed icon get a silhouette of their own), and third-party
+  **[icon packs](https://github.com/jrs8205/ARK-launcher/wiki/Icon-Packs)**.
+- Optional **themed status bar** with the clock, status indicators and notification icons.
+- **Configurable gestures:** swipe up → app drawer, swipe down → notifications, a configurable
+  **left-edge swipe** that launches an app of your choice, an opt-in **swipe up on a home folder**
+  that opens the folder's first app, and a per-icon **"Swipe up opens"** choice (Edit) that opens
+  another app from a home or dock icon.
+- **Customizable look** — a **font** for everything the launcher draws (six families Android ships),
+  adjustable app-label **text size** and **colour**, **one- or two-line
+  labels** (per surface), icon size for home and dock and separately for the app drawer, dock and
+  drawer opacity, an **app drawer background colour** or none at all (the text turns black or white to match, or takes a
+  **label colour** of your own), a
+  **picture of your own behind the app drawer** with a dim for legibility (the colour is off while it is set), an
+  optional **wallpaper blur** behind the rising app drawer (Android 12+, with a
+  strength slider; the home screen fades out under a see-through drawer so only the wallpaper shows), widget
+  edges aligned with the icons, hiding home-screen apps from the drawer, grid columns, **folder
+  columns**, page indicator, and more. App drawer folders can lead the list or sit among the apps
+  A–Z, and every settings section folds under its title.
+- **Backup & restore** — export/import your layout and settings to a file (widgets included).
+- **Double-tap to lock** — double-tap empty home-screen space to lock the screen (opt-in; uses a
+  minimal accessibility service that reads nothing).
+- **Lock desktop** — a toggle that prevents accidental moving, removing, or adding of items.
+- **Pixel-style long-press menus** with app shortcuts and actions, plus an **empty-area menu**
+  (home settings / wallpaper), all in one consistent visual style.
+- Hide apps from the drawer, rename apps with custom labels, and a self-contained settings screen.
+
+## Tech stack
+
+- **Kotlin** + **Jetpack Compose** (Material 3), single-Activity.
+- **Hilt** (DI), **Room** (layout persistence), **DataStore** (preferences), **Coil** (icons),
+  **AppWidgetHost** (widgets).
+- Multi-module architecture with `build-logic` convention plugins.
+- JDK 21, AGP 9, Gradle 9.
+
+## Build
+
+You need **JDK 21** (the Android Studio JBR works well) and the Android SDK.
+
+```bash
+# Point the build at your SDK (or set sdk.dir in local.properties)
+./gradlew :app:assembleDebug
+```
+
+Install on a connected device:
+
+```bash
+adb install -r app/build/outputs/apk/debug/app-debug.apk
+```
+
+Set it as the default launcher from Android's Settings ▸ Apps ▸ Default apps ▸ Home app, or accept
+the prompt the app shows.
+
+Requirements: `minSdk 30`.
+
+## Project layout
+
+- `app` — the single Activity, manifest HOME intent filter, DI entry point, the AppWidgetHost.
+- `core/*` — `model`, `data` (Room/DataStore/repositories + search providers + backup),
+  `ui` (shared Compose components, popups, the expressive theme), `designsystem`, `launcher`.
+- `feature/*` — `home` (workspace + dock + widgets), `appdrawer`, `settings`, `backup`.
+
+## Support development
+
+If ARK-launcher is useful to you, you can support its development:
+
+- [GitHub Sponsors](https://github.com/sponsors/jrs8205) — monthly or one-time
+- [Buy Me a Coffee](https://buymeacoffee.com/jrs8205) — no sign-up needed
+
+## License
+
+Licensed under the **Apache License, Version 2.0** — see [LICENSE](LICENSE).
+
+This project adapts design/architecture patterns (re-implemented in Compose) from the
+Android Open Source Project's **Launcher3** (also Apache-2.0); see [NOTICE](NOTICE) for attribution.
+
+## Contributing
+
+Issues and pull requests are welcome — for feature ideas, consider starting a
+[Discussion](https://github.com/jrs8205/ARK-launcher/discussions) first. By contributing you agree
+your contributions are licensed under the project's Apache-2.0 license.
+
+**Translations welcome.** English and Finnish are maintained by the author; the other languages
+have not been reviewed by native speakers yet, so corrections from native speakers are
+especially appreciated — edit the `values-<lang>/strings.xml` files (one per module) and open a pull request.

@@ -1,0 +1,163 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <!-- Open the notification shade with a swipe-down gesture. -->
+    <uses-permission android:name="android.permission.SET_WALLPAPER" />
+    <uses-permission android:name="android.permission.EXPAND_STATUS_BAR" />
+
+    <!-- Optional: contacts in app-drawer search; requested at runtime, gated by a setting. -->
+    <uses-permission android:name="android.permission.READ_CONTACTS" />
+
+    <!-- Optional: the smartspace widget's next-calendar-event row; requested at runtime from the
+         widget itself. Clock + date work without it. -->
+    <uses-permission android:name="android.permission.READ_CALENDAR" />
+
+    <!-- Optional: the smartspace widget's weather (Open-Meteo needs rough coordinates); requested at
+         runtime from the widget/intro. A cached coarse fix is read — no active location requests. -->
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+
+    <!-- Optional: mobile-signal level for the home status bar; requested at runtime when the status
+         bar is enabled. Battery + Wi-Fi need no permission and work without it. -->
+    <uses-permission android:name="android.permission.READ_PHONE_STATE" />
+
+    <!-- Home status bar indicators: Wi-Fi / mobile / VPN / data-saver state (normal permissions, no
+         runtime prompt). Without ACCESS_NETWORK_STATE the connectivity callbacks throw. -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+
+    <!-- Android 11 only: BluetoothAdapter.ACTION_STATE_CHANGED is delivered with the legacy
+         BLUETOOTH receiver-permission pre-S, so without this the status-bar Bluetooth flag never
+         refreshes there. Android 12+ needs no permission for adapter state. -->
+    <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
+
+    <!-- ACCESS_WIFI_STATE would otherwise IMPLY a required android.hardware.wifi feature and let
+         stores filter out Wi-Fi-less devices; every Wi-Fi indicator degrades gracefully without it. -->
+    <uses-feature android:name="android.hardware.wifi" android:required="false" />
+
+    <!-- A home launcher legitimately interacts with every installed app (open, uninstall, app info,
+         notification badges). Without this, package-visibility filtering in a non-debuggable build
+         silently blocks those cross-app intents (e.g. uninstall opens nothing). -->
+    <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" tools:ignore="QueryAllPackagesPermission" />
+
+    <!-- Required so the system package installer honors our ACTION_DELETE uninstall request; without
+         it the uninstaller silently rejects the call ("does not have REQUEST_DELETE_PACKAGES"). -->
+    <uses-permission android:name="android.permission.REQUEST_DELETE_PACKAGES" />
+
+    <!-- Hides other apps' overlays while the "Open with" backup import asks to replace the layout
+         (Window.setHideOverlayWindows, Android 12+), so an overlay cannot trick that tap. Normal
+         permission, granted at install. -->
+    <uses-permission android:name="android.permission.HIDE_OVERLAY_WINDOWS" />
+
+    <!-- See which apps expose a launcher activity (for the app drawer). -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
+        <!-- The clock app behind the smartspace clock tap, for the fallback when SHOW_ALARMS is refused. -->
+        <intent>
+            <action android:name="android.intent.action.SHOW_ALARMS" />
+        </intent>
+    </queries>
+
+    <application
+        android:name=".LauncherApplication"
+        android:allowBackup="false"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:icon="@mipmap/ic_launcher"
+        android:label="${appLabel}"
+        android:localeConfig="@xml/locales_config"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.KichLauncher.Starting">
+
+        <!-- Portrait-locked like most launchers: the home grid's fixed 6 rows don't fit a phone in
+             landscape (rows/widgets would overlap). Android 12L+ ignores the lock on large screens
+             (tablets, unfolded foldables), which is the desired behavior there. -->
+        <activity
+            android:name=".LauncherActivity"
+            android:exported="true"
+            android:launchMode="singleTask"
+            android:stateNotNeeded="true"
+            android:excludeFromRecents="true"
+            android:taskAffinity=""
+            android:screenOrientation="portrait"
+            android:configChanges="keyboard|keyboardHidden|navigation|orientation|screenSize|screenLayout|smallestScreenSize|density|uiMode"
+            android:theme="@style/Theme.KichLauncher.Starting">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.HOME" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <activity
+            android:name=".wallpaper.WallpaperActivity"
+            android:exported="false"
+            android:label="@string/wallpaper_title"
+            android:theme="@style/Theme.KichLauncher" />
+
+        <activity
+            android:name=".SettingsActivity"
+            android:exported="false"
+            android:label="@string/settings_label"
+            android:theme="@style/Theme.KichLauncher" />
+
+        <!-- Other apps' "Add to home screen" (ShortcutManager.requestPinShortcut) and "Add widget"
+             (AppWidgetManager.requestPinAppWidget): declaring these actions is what makes the system
+             say the launcher supports pin requests. Exported with no category, as the system starts
+             it by explicit component. Its own task, kept out of recents, so it neither pulls the
+             launcher over the requesting app nor lingers. -->
+        <activity
+            android:name=".PinRequestActivity"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:autoRemoveFromRecents="true"
+            android:theme="@style/Theme.KichLauncher.Translucent">
+            <intent-filter>
+                <action android:name="android.content.pm.action.CONFIRM_PIN_SHORTCUT" />
+                <action android:name="android.content.pm.action.CONFIRM_PIN_APPWIDGET" />
+            </intent-filter>
+        </activity>
+
+        <!-- A backup file opened ("Open with") or shared from another app, with that app's read
+             grant: from a file manager app or Downloads, the way round phones whose system storage
+             provider is refused the file. JSON
+             from a content provider only (never a file path, never BROWSABLE); the confirmation
+             runs before anything is replaced. Its own task when started with NEW_TASK, kept out of
+             recents. -->
+        <activity
+            android:name=".BackupImportActivity"
+            android:exported="true"
+            android:label="@string/backup_open_with_label"
+            android:excludeFromRecents="true"
+            android:autoRemoveFromRecents="true"
+            android:taskAffinity=""
+            android:theme="@style/Theme.KichLauncher.Translucent">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:scheme="content" android:mimeType="application/json" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="application/json" />
+            </intent-filter>
+        </activity>
+
+        <!-- Notification dots: the system binds this once the user grants notification access. -->
+        <service
+            android:name=".notifications.NotificationDotListenerService"
+            android:exported="false"
+            android:label="@string/app_name"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
+        </service>
+    </application>
+
+</manifest>

@@ -1,0 +1,541 @@
+package com.kich.launcher.data.backup
+
+import com.google.common.truth.Truth.assertThat
+import com.kich.launcher.data.HomeLayoutRepository
+import com.kich.launcher.data.SettingsRepository
+import com.kich.launcher.data.local.HomeItemEntity
+import org.junit.Test
+
+class BackupMapperTest {
+
+    /** Defaults shared by most cases: a 4-column grid on the main profile (serial 42). */
+    private fun toEntities(
+        items: List<BackupItem>,
+        mainUserSerial: Long = 42L,
+        installedAppKeys: Set<String> = emptySet(),
+        installedPackages: Set<String> = emptySet(),
+        widgetPackages: Set<String> = emptySet(),
+        columns: Int = 4,
+    ) = BackupMapper.toEntities(items, mainUserSerial, installedAppKeys, installedPackages, widgetPackages, columns)
+
+    @Test
+    fun toBackupItems_includes_widgets_with_span_and_provider() {
+        val entities = listOf(
+            HomeItemEntity(id = 1, packageName = "com.a", className = "A", page = 0, cellX = 0, cellY = 0),
+            HomeItemEntity(
+                id = 2, page = 0, cellX = 1, cellY = 0, spanX = 3, spanY = 2,
+                appWidgetId = 7, widgetProvider = "com.w/com.w.Prov",
+            ),
+        )
+        val items = BackupMapper.toBackupItems(entities, 0L)
+        assertThat(items.map { it.id }).containsExactly(1L, 2L)
+        val widget = items.first { it.id == 2L }
+        assertThat(widget.widgetProvider).isEqualTo("com.w/com.w.Prov")
+        assertThat(widget.spanX).isEqualTo(3)
+        assertThat(widget.spanY).isEqualTo(2)
+        // The device-local appWidgetId is never carried into the backup.
+    }
+
+    @Test
+    fun toBackupItems_marks_mainProfile_by_the_current_user_serial() {
+        val entities = listOf(
+            HomeItemEntity(id = 1, packageName = "com.a", className = "A", userSerial = 10L, page = 0, cellX = 0, cellY = 0),
+            HomeItemEntity(id = 2, packageName = "com.b", className = "B", userSerial = 0L, page = 0, cellX = 1, cellY = 0),
+        )
+        val items = BackupMapper.toBackupItems(entities, mainUserSerial = 10L)
+        assertThat(items.first { it.id == 1L }.mainProfile).isTrue()   // current user IS the main profile
+        assertThat(items.first { it.id == 2L }.mainProfile).isFalse()  // some other profile
+    }
+
+    @Test
+    fun toEntities_keeps_widget_when_provider_installed_unbound() {
+        val items = listOf(
+            BackupItem(1, -1, null, "", "", true, null, 0, 0, 0, spanX = 2, spanY = 2, widgetProvider = "com.w/com.w.Prov"),
+            BackupItem(2, -1, null, "", "", true, null, 0, 2, 0, spanX = 1, spanY = 1, widgetProvider = "com.gone/com.gone.Prov"),
+        )
+        val mapping = toEntities(items, installedPackages = setOf("com.w"))
+        assertThat(mapping.skipped).isEqualTo(1) // com.gone provider not installed
+        val widget = mapping.entities.single()
+        assertThat(widget.id).isEqualTo(1L)
+        assertThat(widget.widgetProvider).isEqualTo("com.w/com.w.Prov")
+        assertThat(widget.spanX).isEqualTo(2)
+        assertThat(widget.spanY).isEqualTo(2)
+        assertThat(widget.appWidgetId).isNull() // unbound until re-bound on this device
+    }
+
+    @Test
+    fun toEntities_keeps_widget_from_a_widget_only_package() {
+        val items = listOf(
+            BackupItem(1, -1, null, "", "", true, null, 0, 0, 0, spanX = 2, spanY = 1, widgetProvider = "com.widgetonly/P"),
+        )
+        val mapping = toEntities(items, widgetPackages = setOf("com.widgetonly"))
+        assertThat(mapping.entities.map { it.id }).containsExactly(1L)
+        assertThat(mapping.skipped).isEqualTo(0)
+    }
+
+    @Test
+    fun toEntities_skips_uninstalled_and_remaps_serial() {
+        val items = listOf(
+            BackupItem(1, -1, null, "com.a", "A", true, null, 0, 0, 0),   // installed
+            BackupItem(2, -1, null, "com.gone", "G", true, null, 0, 1, 0), // not installed -> skipped
+            BackupItem(3, -1, "Tools", "", "", false, null, 0, 2, 0),      // folder with 2 children
+            BackupItem(4, 3, null, "com.a", "A", true, null, 0, 0, 0),
+            BackupItem(5, 3, null, "com.b", "B", true, null, 0, 1, 0),
+        )
+        val mapping = toEntities(
+            items,
+            installedAppKeys = setOf("com.a/A", "com.b/B"),
+            installedPackages = setOf("com.a", "com.b"),
+        )
+        assertThat(mapping.skipped).isEqualTo(1)
+        assertThat(mapping.entities.map { it.id }).containsExactly(1L, 3L, 4L, 5L)
+        assertThat(mapping.entities.first { it.id == 1L }.userSerial).isEqualTo(42L)
+        assertThat(mapping.entities.first { it.id == 3L }.userSerial).isEqualTo(0L) // folder
+        assertThat(mapping.entities.all { it.appWidgetId == null }).isTrue()
+    }
+
+    @Test
+    fun toBackupItems_includes_builtin_type() {
+        val entities = listOf(
+            HomeItemEntity(id = 1, page = 0, cellX = 0, cellY = 0, spanX = 4, spanY = 2, builtinType = "smartspace"),
+        )
+        val item = BackupMapper.toBackupItems(entities, 0L).single()
+        assertThat(item.builtinType).isEqualTo("smartspace")
+        assertThat(item.spanX).isEqualTo(4)
+        assertThat(item.spanY).isEqualTo(2)
+        assertThat(item.widgetProvider).isNull()
+    }
+
+    @Test
+    fun toEntities_keeps_builtin_rows_without_any_install_check() {
+        val items = listOf(
+            BackupItem(1, -1, null, "", "", true, null, 0, 0, 0, spanX = 4, spanY = 2, builtinType = "smartspace"),
+        )
+        val mapping = toEntities(items)
+        assertThat(mapping.skipped).isEqualTo(0)
+        val e = mapping.entities.single()
+        assertThat(e.builtinType).isEqualTo("smartspace")
+        assertThat(e.spanX).isEqualTo(4)
+        assertThat(e.spanY).isEqualTo(2)
+        assertThat(e.appWidgetId).isNull()
+        assertThat(e.widgetProvider).isNull()
+        assertThat(e.userSerial).isEqualTo(0L) // built-ins have no profile
+    }
+
+    @Test
+    fun toEntities_keeps_a_notifications_builtin_row() {
+        val items = listOf(
+            BackupItem(1, -1, null, "", "", true, null, 0, 0, 0, spanX = 4, spanY = 1, builtinType = "notifications"),
+        )
+        val mapping = toEntities(items)
+        assertThat(mapping.skipped).isEqualTo(0)
+        val e = mapping.entities.single()
+        assertThat(e.builtinType).isEqualTo("notifications")
+        assertThat(e.spanX).isEqualTo(4)
+        assertThat(e.spanY).isEqualTo(1)
+        assertThat(e.appWidgetId).isNull()
+    }
+
+    @Test
+    fun toEntities_clamps_builtin_spans_like_a_widget_footprint() {
+        val items = listOf(
+            BackupItem(1, -1, null, "", "", true, null, 0, 0, 0, spanX = 30, spanY = -2, builtinType = "smartspace"),
+        )
+        val e = toEntities(items, columns = SettingsRepository.MAX_COLUMNS).entities.single()
+        assertThat(e.spanX).isEqualTo(SettingsRepository.MAX_COLUMNS)
+        assertThat(e.spanY).isEqualTo(1)
+    }
+
+    // --- Corrupt/hand-edited backup sanitization ---------------------------------------------
+
+    @Test
+    fun toEntities_skips_rows_with_invalid_page_or_cells() {
+        val items = listOf(
+            BackupItem(1, -1, null, "com.a", "A", true, null, 999_999_999, 0, 0), // insane page
+            BackupItem(2, -1, null, "com.a", "A", true, null, -1, 0, 0),          // negative page
+            BackupItem(3, -1, null, "com.a", "A", true, null, 0, -2, 0),          // negative cellX
+            BackupItem(4, -1, null, "com.a", "A", true, null, 0, 0, -7),          // negative cellY
+            BackupItem(5, -1, null, "com.a", "A", true, null, 0, 1, 1),           // valid
+        )
+        val mapping = toEntities(items, installedAppKeys = setOf("com.a/A"), installedPackages = setOf("com.a"))
+        assertThat(mapping.entities.map { it.id }).containsExactly(5L)
+        assertThat(mapping.skipped).isEqualTo(4)
+    }
+
+    @Test
+    fun toEntities_keeps_a_battery_builtin_row() {
+        val items = listOf(
+            BackupItem(1, -1, null, "", "", true, null, 0, 0, 0, spanX = 1, spanY = 1, builtinType = "battery"),
+        )
+        val mapping = toEntities(items)
+        assertThat(mapping.skipped).isEqualTo(0)
+        val e = mapping.entities.single()
+        assertThat(e.builtinType).isEqualTo("battery")
+        assertThat(e.spanX).isEqualTo(1)
+    }
+
+    @Test
+    fun toEntities_validates_against_the_backups_own_row_count() {
+        val items = listOf(
+            BackupItem(1, -1, null, "com.a", "A", true, null, 0, 0, 7), // row 7 — only on an 8-row grid
+        )
+        val eightRows = BackupMapper.toEntities(
+            items, 42L, setOf("com.a/A"), setOf("com.a"), emptySet(), columns = 4, gridRows = 8,
+        )
+        assertThat(eightRows.entities.map { it.id }).containsExactly(1L)
+
+        val sixRows = toEntities(items, installedAppKeys = setOf("com.a/A"), installedPackages = setOf("com.a"))
+        assertThat(sixRows.entities).isEmpty()
+        assertThat(sixRows.skipped).isEqualTo(1)
+    }
+
+    @Test
+    fun toEntities_keeps_an_item_on_the_trailing_page_index_MAX_PAGES() {
+        // The pager offers one page past the cap while dragging, so index MAX_PAGES is a legal
+        // home for an item — restore must keep it (and still reject anything beyond).
+        val items = listOf(
+            BackupItem(1, -1, null, "com.a", "A", true, null, HomeLayoutRepository.MAX_PAGES, 0, 0),
+            BackupItem(2, -1, null, "com.a", "A", true, null, HomeLayoutRepository.MAX_PAGES + 1, 1, 0),
+        )
+        val mapping = toEntities(items, installedAppKeys = setOf("com.a/A"), installedPackages = setOf("com.a"))
+        assertThat(mapping.entities.map { it.id }).containsExactly(1L)
+        assertThat(mapping.skipped).isEqualTo(1)
+    }
+
+    @Test
+    fun toEntities_rejects_home_cell_outside_the_real_grid() {
+        val items = listOf(
+            BackupItem(1, -1, null, "com.a", "A", true, null, 0, 10, 0),  // cellX beyond 4 columns
+            BackupItem(2, -1, null, "com.a", "A", true, null, 0, 0, 999), // cellY beyond 6 rows
+        )
+        val mapping = toEntities(items, installedAppKeys = setOf("com.a/A"), installedPackages = setOf("com.a"))
+        assertThat(mapping.entities).isEmpty()
+        assertThat(mapping.skipped).isEqualTo(2)
+    }
+
+    @Test
+    fun toEntities_clamps_widget_spans_to_the_grid() {
+        val items = listOf(
+            BackupItem(1, -1, null, "", "", true, null, 0, 0, 0, spanX = 30, spanY = -2, widgetProvider = "com.w/P"),
+        )
+        val mapping = toEntities(items, installedPackages = setOf("com.w"), columns = SettingsRepository.MAX_COLUMNS)
+        val w = mapping.entities.single()
+        assertThat(w.spanX).isEqualTo(SettingsRepository.MAX_COLUMNS)
+        assertThat(w.spanY).isEqualTo(1) // negative -> 1
+    }
+
+    @Test
+    fun toEntities_rejects_widget_past_right_or_bottom_edge() {
+        val items = listOf(
+            // cellX 3 + span 2 = 5 > 4 columns -> rejected (position, not span, is at fault)
+            BackupItem(1, -1, null, "", "", true, null, 0, 3, 0, spanX = 2, spanY = 1, widgetProvider = "com.w/P"),
+            // cellY 5 + span 2 = 7 > 6 rows -> rejected
+            BackupItem(2, -1, null, "", "", true, null, 0, 0, 5, spanX = 1, spanY = 2, widgetProvider = "com.w/P"),
+            // oversized span at origin is CLAMPED to the grid, not rejected
+            BackupItem(3, -1, null, "", "", true, null, 1, 0, 0, spanX = 9, spanY = 9, widgetProvider = "com.w/P"),
+        )
+        val mapping = toEntities(items, installedPackages = setOf("com.w"))
+        assertThat(mapping.skipped).isEqualTo(2)
+        val clamped = mapping.entities.single()
+        assertThat(clamped.spanX).isEqualTo(4)
+        assertThat(clamped.spanY).isEqualTo(6)
+    }
+
+    @Test
+    fun toEntities_rejects_icon_inside_widget_footprint() {
+        val items = listOf(
+            BackupItem(1, -1, null, "", "", true, null, 0, 0, 0, spanX = 2, spanY = 2, widgetProvider = "com.w/P"),
+            BackupItem(2, -1, null, "com.a", "A", true, null, 0, 1, 0), // start cell inside the 2x2
+            BackupItem(3, -1, null, "com.a", "A", true, null, 0, 2, 0), // outside -> kept
+        )
+        val mapping = toEntities(items, installedAppKeys = setOf("com.a/A"), installedPackages = setOf("com.w", "com.a"))
+        assertThat(mapping.entities.map { it.id }).containsExactly(1L, 3L)
+        assertThat(mapping.skipped).isEqualTo(1)
+    }
+
+    @Test
+    fun toEntities_rejects_overlapping_widget_footprints() {
+        val items = listOf(
+            BackupItem(1, -1, null, "", "", true, null, 0, 0, 0, spanX = 3, spanY = 2, widgetProvider = "com.w/P"),
+            BackupItem(2, -1, null, "", "", true, null, 0, 2, 1, spanX = 2, spanY = 2, widgetProvider = "com.w/P"),
+        )
+        val mapping = toEntities(items, installedPackages = setOf("com.w"))
+        assertThat(mapping.entities.map { it.id }).containsExactly(1L)
+        assertThat(mapping.skipped).isEqualTo(1)
+    }
+
+    @Test
+    fun toEntities_skips_orphan_folder_children() {
+        val items = listOf(
+            BackupItem(10, -1, "Tools", "", "", true, null, 0, 0, 0),      // folder kept (2 children)
+            BackupItem(11, 10, null, "com.a", "A", true, null, 0, 0, 0),   // child of kept folder
+            BackupItem(13, 10, null, "com.b", "B", true, null, 0, 1, 0),   // child of kept folder
+            BackupItem(12, 99, null, "com.a", "A", true, null, 0, 0, 0),   // orphan -> skipped
+        )
+        val mapping = toEntities(
+            items,
+            installedAppKeys = setOf("com.a/A", "com.b/B"),
+            installedPackages = setOf("com.a", "com.b"),
+        )
+        assertThat(mapping.entities.map { it.id }).containsExactly(10L, 11L, 13L)
+        assertThat(mapping.skipped).isEqualTo(1)
+    }
+
+    // --- Folder dissolution (mirrors HomeLayoutRepository.dissolveIfNeeded) -------------------
+
+    @Test
+    fun toEntities_drops_a_folder_whose_children_were_all_filtered_out() {
+        // Neither child app is installed on the restore target: without the post-pass the folder row
+        // restored EMPTY — and an empty folder has no delete affordance, so it was stuck forever.
+        val items = listOf(
+            BackupItem(10, -1, "Tools", "", "", true, null, 0, 0, 0),
+            BackupItem(11, 10, null, "com.gone", "G", true, null, 0, 0, 0),
+            BackupItem(12, 10, null, "com.gone2", "G2", true, null, 0, 1, 0),
+        )
+        val mapping = toEntities(items)
+        assertThat(mapping.entities).isEmpty()
+        assertThat(mapping.skipped).isEqualTo(3) // both children AND the emptied folder
+    }
+
+    @Test
+    fun toEntities_dissolves_a_folder_left_with_a_single_child_onto_its_cell() {
+        val items = listOf(
+            BackupItem(10, -1, "Tools", "", "", true, null, 0, 2, 3),
+            BackupItem(11, 10, null, "com.a", "A", true, null, 0, 0, 0),    // survives
+            BackupItem(12, 10, null, "com.gone", "G", true, null, 0, 1, 0), // filtered out
+        )
+        val mapping = toEntities(items, installedAppKeys = setOf("com.a/A"), installedPackages = setOf("com.a"))
+        val promoted = mapping.entities.single()
+        assertThat(promoted.id).isEqualTo(11L)
+        assertThat(promoted.containerId).isEqualTo(HomeItemEntity.HOME)
+        assertThat(promoted.page).isEqualTo(0)
+        assertThat(promoted.cellX).isEqualTo(2)
+        assertThat(promoted.cellY).isEqualTo(3)
+        assertThat(mapping.skipped).isEqualTo(2) // the filtered child + the dissolved folder row
+    }
+
+    @Test
+    fun toEntities_dissolve_drops_a_last_child_whose_app_is_already_on_home() {
+        // Like the live dissolveIfNeeded: a second HOME row of one app breaks drag and remove (the
+        // UI keys icons by app), so the folder's last child goes with the folder and its cell stays empty.
+        val items = listOf(
+            BackupItem(1, -1, null, "com.a", "A", true, null, 0, 0, 0),
+            BackupItem(10, -1, "Tools", "", "", true, null, 0, 1, 0),
+            BackupItem(11, 10, null, "com.a", "A", true, null, 0, 0, 0),
+            BackupItem(12, 10, null, "com.gone", "G", true, null, 0, 1, 0),
+        )
+        val mapping = toEntities(items, installedAppKeys = setOf("com.a/A"), installedPackages = setOf("com.a"))
+        assertThat(mapping.entities.map { it.id }).containsExactly(1L)
+        assertThat(mapping.skipped).isEqualTo(3) // the uninstalled child, the folder, the duplicate
+    }
+
+    @Test
+    fun toEntities_dissolve_promotes_an_app_held_by_two_dissolving_folders_only_once() {
+        // Two folders each hold Chrome plus one app the restore target lacks: both dissolve, and
+        // Chrome was not on home before, so each child would have become a HOME row of its own.
+        val items = listOf(
+            BackupItem(10, -1, "Tools", "", "", true, null, 0, 0, 0),
+            BackupItem(11, 10, null, "com.a", "A", true, null, 0, 0, 0),
+            BackupItem(12, 10, null, "com.gone", "G", true, null, 0, 1, 0),
+            BackupItem(20, -1, "Web", "", "", true, null, 0, 1, 0),
+            BackupItem(21, 20, null, "com.a", "A", true, null, 0, 0, 0),
+            BackupItem(22, 20, null, "com.gone2", "G2", true, null, 0, 1, 0),
+        )
+        val mapping = toEntities(items, installedAppKeys = setOf("com.a/A"), installedPackages = setOf("com.a"))
+        val home = mapping.entities.filter { it.containerId == HomeItemEntity.HOME }
+        assertThat(home.map { it.packageName }).containsExactly("com.a")
+        assertThat(mapping.skipped).isEqualTo(5) // two missing children, two folders, the duplicate
+    }
+
+    @Test
+    fun toEntities_compacts_folder_children_so_addToFolder_cannot_collide() {
+        // The middle child is not installed on the restore target. Left as [0, 2, 3] the next
+        // addToFolder (childCount 3 as the new index) hit the unique cell index and crashed.
+        val items = listOf(
+            BackupItem(10, -1, "Tools", "", "", true, null, 0, 0, 0),
+            BackupItem(11, 10, null, "com.a", "A", true, null, 0, 0, 0),
+            BackupItem(12, 10, null, "com.gone", "G", true, null, 0, 1, 0),
+            BackupItem(13, 10, null, "com.b", "B", true, null, 0, 2, 0),
+            BackupItem(14, 10, null, "com.c", "C", true, null, 0, 3, 0),
+        )
+        val mapping = toEntities(
+            items,
+            installedAppKeys = setOf("com.a/A", "com.b/B", "com.c/C"),
+            installedPackages = setOf("com.a", "com.b", "com.c"),
+        )
+        val children = mapping.entities.filter { it.containerId == 10L }.sortedBy { it.cellX }
+        assertThat(children.map { it.id }).containsExactly(11L, 13L, 14L).inOrder()
+        assertThat(children.map { it.cellX }).containsExactly(0, 1, 2).inOrder()
+    }
+
+    @Test
+    fun toEntities_normalizes_hand_edited_child_positions_to_the_order_index() {
+        // A child's page/cellY are not grid coordinates; the live paths keep them 0 and order by
+        // cellX, so an edited file must come back in that shape, in the file's reading order.
+        val items = listOf(
+            BackupItem(10, -1, "Tools", "", "", true, null, 0, 0, 0),
+            BackupItem(11, 10, null, "com.a", "A", true, null, 0, 5, 1),
+            BackupItem(12, 10, null, "com.b", "B", true, null, 0, 7, 0),
+        )
+        val mapping = toEntities(
+            items,
+            installedAppKeys = setOf("com.a/A", "com.b/B"),
+            installedPackages = setOf("com.a", "com.b"),
+        )
+        val children = mapping.entities.filter { it.containerId == 10L }.sortedBy { it.cellX }
+        assertThat(children.map { it.id }).containsExactly(12L, 11L).inOrder()
+        assertThat(children.map { Triple(it.page, it.cellX, it.cellY) })
+            .containsExactly(Triple(0, 0, 0), Triple(0, 1, 0)).inOrder()
+    }
+
+    @Test
+    fun toEntities_skips_duplicate_app_in_the_same_container_but_allows_it_in_another() {
+        val items = listOf(
+            BackupItem(10, -1, "Tools", "", "", true, null, 0, 0, 0),
+            BackupItem(1, -1, null, "com.a", "A", true, null, 0, 0, 1),
+            BackupItem(2, -1, null, "com.a", "A", true, null, 0, 1, 1),   // dup on HOME -> skipped
+            BackupItem(3, 10, null, "com.a", "A", true, null, 0, 0, 0),   // same app in folder -> OK
+            BackupItem(4, 10, null, "com.b", "B", true, null, 0, 1, 0),   // second child keeps the folder alive
+        )
+        val mapping = toEntities(
+            items,
+            installedAppKeys = setOf("com.a/A", "com.b/B"),
+            installedPackages = setOf("com.a", "com.b"),
+        )
+        assertThat(mapping.entities.map { it.id }).containsExactly(10L, 1L, 3L, 4L)
+        assertThat(mapping.skipped).isEqualTo(1)
+    }
+
+    @Test
+    fun toEntities_rejects_unknown_builtin_and_malformed_widget_provider() {
+        val items = listOf(
+            BackupItem(1, -1, null, "", "", true, null, 0, 0, 0, builtinType = "evil"),
+            BackupItem(2, -1, null, "", "", true, null, 0, 1, 0, widgetProvider = "no-slash"),
+            BackupItem(3, -1, null, "", "", true, null, 0, 2, 0, spanX = 2, builtinType = "notifications"),
+        )
+        val mapping = toEntities(items, installedPackages = setOf("no-slash"))
+        assertThat(mapping.entities.map { it.id }).containsExactly(3L)
+        assertThat(mapping.skipped).isEqualTo(2)
+    }
+
+    @Test
+    fun toEntities_drops_duplicate_cells_keeping_the_first() {
+        val items = listOf(
+            BackupItem(1, -1, null, "com.a", "A", true, null, 0, 0, 0),
+            BackupItem(2, -1, null, "com.b", "B", true, null, 0, 0, 0), // same cell -> dropped
+            BackupItem(3, -1, null, "com.b", "B", true, null, 0, 1, 0),
+        )
+        val mapping = toEntities(
+            items,
+            installedAppKeys = setOf("com.a/A", "com.b/B"),
+            installedPackages = setOf("com.a", "com.b"),
+        )
+        assertThat(mapping.entities.map { it.id }).containsExactly(1L, 3L)
+        assertThat(mapping.skipped).isEqualTo(1)
+    }
+
+    @Test
+    fun toEntities_drops_duplicate_ids_keeping_the_first() {
+        val items = listOf(
+            BackupItem(1, -1, null, "com.a", "A", true, null, 0, 0, 0),
+            BackupItem(1, -1, null, "com.b", "B", true, null, 0, 1, 0), // same id -> dropped
+        )
+        val mapping = toEntities(
+            items,
+            installedAppKeys = setOf("com.a/A", "com.b/B"),
+            installedPackages = setOf("com.a", "com.b"),
+        )
+        assertThat(mapping.entities).hasSize(1)
+        assertThat(mapping.entities.single().packageName).isEqualTo("com.a")
+        assertThat(mapping.skipped).isEqualTo(1)
+    }
+
+    // --- Profiles ------------------------------------------------------------------------------
+
+    @Test
+    fun installedInProfile_keeps_only_that_profiles_apps() {
+        val main = BackupMapper.installedInProfile(listOf("com.a/A/0", "com.w/W/10", "com.b/B/0", "bad"), 0L)
+        assertThat(main.appKeys).containsExactly("com.a/A", "com.b/B")
+        assertThat(main.packages).containsExactly("com.a", "com.b")
+    }
+
+    @Test
+    fun remapSettingsProfiles_moves_the_exporting_profiles_keys_and_drops_the_rest() {
+        // Like the home rows: only the profile the launcher ran as restores, onto this device's own.
+        val settings = mapOf(
+            "dock_favorites" to "com.a/A/5\ncom.w/W/12",
+            "hidden_apps" to "com.w/W/12",
+            "custom_labels" to "com.a/A/5\tMail",
+            "drawer_folders" to "1\tF\tcom.a/A/5\tcom.w/W/12",
+            "left_swipe_app_key" to "com.w/W/12",
+            "weather_app_key" to "com.a/A/5",
+            "home_columns" to 5,
+        )
+        val out = BackupMapper.remapSettingsProfiles(settings, sourceMainSerial = 5L, targetMainSerial = 0L)
+        assertThat(out).containsExactly(
+            "dock_favorites", "com.a/A/0",
+            "hidden_apps", "",
+            "custom_labels", "com.a/A/0\tMail",
+            "drawer_folders", "1\tF\tcom.a/A/0",
+            "left_swipe_app_key", "",
+            "weather_app_key", "com.a/A/0",
+            "home_columns", 5,
+        )
+    }
+
+    /** Issue #23's shortcut icons are filed by the shortcut's identity, profile serial last: they move
+     *  with the rows, and a shortcut id with slashes of its own (a web shortcut's address) stays whole. */
+    @Test
+    fun remapSettingsProfiles_moves_the_shortcut_icon_keys_too_keeping_the_shortcut_id() {
+        val settings = mapOf(
+            "shortcut_icons" to "org.mozilla.firefox/https://github.com//5\tpack:com.example.pack:octocat\norg.work/x/12\tpack:com.example.pack:w",
+        )
+        val out = BackupMapper.remapSettingsProfiles(settings, sourceMainSerial = 5L, targetMainSerial = 0L)
+        assertThat(out).containsExactly("shortcut_icons", "org.mozilla.firefox/https://github.com//0\tpack:com.example.pack:octocat")
+    }
+
+    @Test
+    fun remapSettingsProfiles_leaves_an_older_files_keys_as_they_are() {
+        // Older files don't record the exporting profile, and the keys can't tell it: a cleared
+        // dock and one hidden work app would make the work profile look like the main one, and
+        // moving its key to profile 0 would hide the personal copy. Such files import as before.
+        val settings = mapOf("dock_favorites" to "", "hidden_apps" to "com.mail/Main/10")
+        assertThat(BackupMapper.remapSettingsProfiles(settings, null, 0L)).isEqualTo(settings)
+        val mixed = mapOf("dock_favorites" to "w/W/10\na/A/0\nb/B/0")
+        assertThat(BackupMapper.remapSettingsProfiles(mixed, null, 11L)).isEqualTo(mixed)
+    }
+
+    // --- Pinned shortcuts ------------------------------------------------------------------------
+
+    @Test
+    fun toEntities_skips_shortcuts_the_system_no_longer_has() {
+        val items = listOf(
+            BackupItem(1, -1, null, "com.p", "", true, "kept", 0, 0, 0),
+            BackupItem(2, -1, null, "com.p", "", true, "gone", 0, 1, 0),
+        )
+        val mapping = BackupMapper.toEntities(
+            items, 42L, emptySet(), setOf("com.p"), emptySet(), columns = 4,
+            missingShortcuts = setOf("com.p" to "gone"),
+        )
+        assertThat(mapping.entities.map { it.shortcutId }).containsExactly("kept")
+        assertThat(mapping.skipped).isEqualTo(1)
+    }
+
+    @Test
+    fun toEntities_skips_a_shortcut_inside_a_folder() {
+        // Folders render only apps: a shortcut child would be an invisible extra child.
+        val items = listOf(
+            BackupItem(10, -1, "Tools", "", "", true, null, 0, 0, 0),
+            BackupItem(11, 10, null, "com.a", "A", true, null, 0, 0, 0),
+            BackupItem(12, 10, null, "com.b", "B", true, null, 0, 1, 0),
+            BackupItem(13, 10, null, "com.p", "", true, "s", 0, 2, 0),
+        )
+        val mapping = toEntities(
+            items,
+            installedAppKeys = setOf("com.a/A", "com.b/B"),
+            installedPackages = setOf("com.a", "com.b", "com.p"),
+        )
+        assertThat(mapping.entities.map { it.id }).containsExactly(10L, 11L, 12L)
+        assertThat(mapping.skipped).isEqualTo(1)
+    }
+}

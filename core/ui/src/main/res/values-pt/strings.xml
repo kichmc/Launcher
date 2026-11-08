@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="rename_label">Nome</string>
+    <string name="rename_save">Salvar</string>
+    <string name="rename_cancel">Cancelar</string>
+    <string name="rename_reset">Restaurar padrão</string>
+    <string name="shortcut_pin">Fixar na tela inicial</string>
+    <string name="shortcut_unavailable">O atalho não está disponível</string>
+    <string name="app_info_unavailable">Não foi possível abrir os detalhes do app</string>
+    <string name="home_full">A tela inicial está cheia</string>
+    <string name="folder_default_name">Pasta</string>
+    <string name="popup_widgets">Widgets</string>
+    <string name="notice_work_apps_need_default">Defina o Kich Launcher como tela inicial padrão para pausar os apps de trabalho.</string>
+    <string name="edit_title">Editar</string>
+    <string name="edit_icon_hint">Toque no ícone para alterá-lo</string>
+    <string name="edit_swipe_up">Deslizar para cima abre</string>
+    <string name="edit_swipe_up_none">Nada</string>
+    <string name="edit_swipe_up_none_option">Nada (o gesto habitual)</string>
+    <string name="icon_change">Alterar ícone</string>
+    <string name="icon_picker_title">Escolher ícone</string>
+    <string name="icon_picker_close">Fechar</string>
+    <string name="icon_picker_back">Voltar</string>
+    <string name="icon_original">Ícone original</string>
+    <string name="icon_from_gallery">Escolher da galeria</string>
+    <string name="icon_packs">Pacotes de ícones</string>
+    <string name="icon_packs_none">Nenhum pacote de ícones instalado. Instale um na sua loja de aplicativos para usar os ícones dele aqui.</string>
+    <string name="icon_search">Pesquisar ícones</string>
+    <string name="icon_suggested">Sugerido</string>
+    <string name="icon_picture_failed">Essa imagem não pode ser usada como ícone.</string>
+</resources>

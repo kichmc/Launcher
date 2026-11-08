@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="backup_title">Copia de seguridad</string>
+    <string name="backup_file_section">Archivo</string>
+    <string name="backup_export">Exportar a un archivo</string>
+    <string name="backup_import">Importar desde un archivo</string>
+    <string name="backup_default_name">Kich Launcher-backup</string>
+    <string name="backup_exported">Copia de seguridad guardada</string>
+    <string name="backup_restored">Copia de seguridad restaurada</string>
+    <plurals name="backup_restored_skipped">
+        <item quantity="one">Copia de seguridad restaurada — %1$d elemento omitido (no instalado)</item>
+        <item quantity="many">Copia de seguridad restaurada — %1$d elementos omitidos (no instalados)</item>
+        <item quantity="other">Copia de seguridad restaurada — %1$d elementos omitidos (no instalados)</item>
+    </plurals>
+    <string name="backup_import_invalid">Archivo de copia de seguridad no válido o incompatible</string>
+    <string name="backup_error_too_large">El archivo de copia de seguridad es demasiado grande</string>
+    <string name="backup_failed">No se pudo completar la operación</string>
+    <string name="backup_import_read_blocked">El servicio de almacenamiento de Android bloqueó la lectura de este archivo. Elígelo en Descargas en lugar de en las carpetas de almacenamiento del teléfono, o ábrelo con Kich Launcher desde otra app de gestión de archivos.</string>
+    <string name="backup_import_timeout">El archivo no se abrió a tiempo. Vuelve a intentarlo o elígelo en Descargas o en otra app de gestión de archivos.</string>
+    <string name="backup_open_with_label">Restaurar en Kich Launcher</string>
+    <string name="backup_restoring">Restaurando…</string>
+    <string name="backup_restore_confirm_title">¿Restaurar la copia de seguridad?</string>
+    <string name="backup_restore_confirm_msg">Se reemplazarán la pantalla de inicio y la configuración actuales. Los widgets se restaurarán como marcadores de posición; tócalos para configurarlos.</string>
+    <string name="backup_restore_confirm_ok">Restaurar</string>
+    <string name="backup_cancel">Cancelar</string>
+    <string name="backup_last_time">Última copia: %1$s</string>
+</resources>

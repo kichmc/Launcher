@@ -1,0 +1,443 @@
+package com.kich.launcher.data
+
+import android.content.ComponentCallbacks
+import android.content.Context
+import android.content.pm.ApplicationInfo
+import android.content.pm.LauncherActivityInfo
+import android.content.pm.LauncherApps
+import android.content.pm.PackageManager
+import android.content.pm.ShortcutInfo
+import android.content.res.Configuration
+import android.graphics.Rect
+import android.graphics.drawable.AdaptiveIconDrawable
+import android.graphics.drawable.ColorDrawable
+import android.graphics.drawable.Drawable
+import android.os.Build
+import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
+import android.os.Process
+import android.os.UserHandle
+import android.os.UserManager
+import androidx.annotation.RequiresApi
+import coil3.ImageLoader
+import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.channels.awaitClose
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.flow.emptyFlow
+import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
+import com.kich.launcher.model.AppItem
+import com.kich.launcher.model.IconEpochs
+import javax.inject.Inject
+import javax.inject.Provider
+import javax.inject.Singleton
+
+/** Pure decision behind [LauncherAppsSource.isAppInstalled]; [profile] is the profile lookup's outcome. */
+internal fun <U : Any> installVerdict(profile: Result<U?>, appInfo: (U) -> Result<*>): Boolean {
+    // A lookup that THREW is not a removed profile: only a successful null answer is definitive.
+    if (profile.isFailure) return true
+    val user = profile.getOrNull() ?: return false // the whole profile is gone → its rows are stale
+    val result = appInfo(user)
+    return result.isSuccess || result.exceptionOrNull() !is PackageManager.NameNotFoundException
+}
+
+/**
+ * Wraps [LauncherApps]: streams the installed launchable apps (reacting to install/remove/change),
+ * launches apps, and resolves their icons.
+ */
+@Singleton
+class LauncherAppsSource @Inject constructor(
+    @ApplicationContext private val context: Context,
+    private val iconPacks: IconPackRepository,
+    // Provider breaks the instantiation cycle: the ImageLoader itself is built with this source.
+    private val imageLoader: Provider<ImageLoader>,
+    private val labelCache: AppLabelCache,
+) : AppRowResolver {
+    private val launcherApps = context.getSystemService(LauncherApps::class.java)
+    private val userManager = context.getSystemService(UserManager::class.java)
+
+    /** Package names from LauncherApps callbacks, in batches for ONE collector ([EventPool]) — lets
+     *  feature-layer caches (e.g. resolved pinned shortcuts) invalidate per package instead of
+     *  guessing from full app-list reloads. */
+    private val packageEventPool = EventPool<String>()
+    val packageEvents: Flow<Set<String>> = packageEventPool.batches
+
+    /** (package, profile serial) from onPackageRemoved — a DEFINITIVE uninstall for that profile —
+     *  in batches for ONE collector ([EventPool]): an uninstall during a burst, or while no
+     *  ViewModel is there to collect, must still reach the home-row cleanup. Updates fire
+     *  onPackageChanged and storage ejection onPackagesUnavailable, so neither can reach this flow
+     *  and trigger a wrongful cleanup. */
+    private val packageRemovalPool = EventPool<Pair<String, Long>>()
+    val packageRemovals: Flow<Set<Pair<String, Long>>> = packageRemovalPool.batches
+
+    /**
+     * (package, profile serial) whose app shortcuts were added, updated, disabled or removed, in
+     * batches for ONE collector ([EventPool]). The home collector waits for [ShortcutPinLock]
+     * through a whole restore, and a chat app re-publishes on every message: the pool keeps every
+     * owner of that time without a backlog.
+     */
+    private val shortcutChangePool = EventPool<Pair<String, Long>>()
+    val shortcutChanges: Flow<Set<Pair<String, Long>>> = shortcutChangePool.batches
+
+    /** Re-fetch tokens for app icons (see [IconEpochs]): a package update bumps that package, an
+     *  icon-pack content change bumps the global generation. AppIcon feeds these into the Coil
+     *  model/cache key, so even icons already on screen re-fetch immediately. */
+    private val _iconEpochs = MutableStateFlow(IconEpochs())
+    val iconEpochs: StateFlow<IconEpochs> = _iconEpochs
+
+    /** Fail-safe install check for the ghost-row sweep: only a definitive "name not found" (or a
+     *  removed profile) answers false — any other failure keeps the row (a locked work profile or
+     *  a transient Binder error must never wipe real items). */
+    fun isAppInstalled(packageName: String, userSerial: Long): Boolean {
+        val um = userManager ?: return true
+        return installVerdict(runCatching { um.getUserForSerialNumber(userSerial) }) { user ->
+            runCatching { launcherApps.getApplicationInfo(packageName, 0, user) }
+        }
+    }
+
+    /** The profile behind [userSerial] when its apps can be queried right now: not paused (quiet
+     *  mode, a locked private space) and unlocked. Null when it's gone, unavailable or unknown. */
+    private fun availableProfile(userSerial: Long): UserHandle? {
+        val um = userManager ?: return null
+        val user = um.getUserForSerialNumber(userSerial) ?: return null
+        return if (um.isQuietModeEnabled(user) || !um.isUserUnlocked(user)) null else user
+    }
+
+    override fun launchTargets(packageName: String, userSerial: Long): PackageTargets {
+        return try {
+            val user = availableProfile(userSerial) ?: return PackageTargets.Unknown
+            // False for a disabled package as well as a missing one: disabled apps are kept on purpose.
+            if (!launcherApps.isPackageEnabled(packageName, user)) return PackageTargets.Unknown
+            PackageTargets.Launchable(
+                launcherApps.getActivityList(packageName, user).map { it.componentName.className }.distinct(),
+            )
+        } catch (e: Exception) {
+            PackageTargets.Unknown
+        }
+    }
+
+    override fun missingShortcuts(packageName: String, userSerial: Long, shortcutIds: Collection<String>): Set<String> {
+        if (shortcutIds.isEmpty()) return emptySet()
+        return try {
+            val user = availableProfile(userSerial) ?: return emptySet()
+            // Only the default home app may query shortcuts; a disabled package keeps its rows.
+            if (!launcherApps.hasShortcutHostPermission()) return emptySet()
+            if (!launcherApps.isPackageEnabled(packageName, user)) return emptySet()
+            val query = LauncherApps.ShortcutQuery()
+                .setPackage(packageName)
+                .setShortcutIds(shortcutIds.toList())
+                .setQueryFlags(
+                    LauncherApps.ShortcutQuery.FLAG_MATCH_PINNED or
+                        LauncherApps.ShortcutQuery.FLAG_MATCH_DYNAMIC or
+                        LauncherApps.ShortcutQuery.FLAG_MATCH_MANIFEST,
+                )
+            val found = launcherApps.getShortcuts(query, user) ?: return emptySet()
+            shortcutIds.toSet() - found.map { it.id }.toSet()
+        } catch (e: Exception) {
+            emptySet()
+        }
+    }
+
+    override fun isPinnedHere(packageName: String, userSerial: Long, shortcutId: String): Boolean? = try {
+        val user = availableProfile(userSerial)
+        if (user == null || !launcherApps.hasShortcutHostPermission()) {
+            null
+        } else {
+            // FLAG_MATCH_PINNED alone: the shortcuts pinned by this launcher, not by any other.
+            val query = LauncherApps.ShortcutQuery()
+                .setPackage(packageName)
+                .setShortcutIds(listOf(shortcutId))
+                .setQueryFlags(LauncherApps.ShortcutQuery.FLAG_MATCH_PINNED)
+            launcherApps.getShortcuts(query, user)?.any { it.id == shortcutId && it.isPinned }
+        }
+    } catch (e: Exception) {
+        null
+    }
+
+    override fun isTemporarilyUnavailable(packageName: String, userSerial: Long): Boolean {
+        val um = userManager ?: return true
+        return try {
+            val user = um.getUserForSerialNumber(userSerial) ?: return false // the profile was removed for good
+            if (um.isQuietModeEnabled(user) || !um.isUserUnlocked(user)) return true
+            // Archived (Android 15+): the app is "not installed" to the package manager, but the
+            // launcher still lists it, LauncherApps reports it enabled, and a tap restores it — its
+            // home icon and folder place must survive, as they do in Launcher3. Only an archived
+            // package is enabled while NOT installed; an installed app is enabled too, and the
+            // page purge asks here without an install check first, so both halves are checked.
+            if (Build.VERSION.SDK_INT >= 35 && !isInstalledNow(packageName, user) &&
+                launcherApps.isPackageEnabled(packageName, user)
+            ) return true
+            // Unmounted storage: the package manager still knows the app (with uninstalled packages
+            // included) but can't launch it — Launcher3's "app on SD card" check.
+            val info = launcherApps.getApplicationInfo(packageName, PackageManager.MATCH_UNINSTALLED_PACKAGES, user)
+            (info.flags and ApplicationInfo.FLAG_EXTERNAL_STORAGE) != 0 && !launcherApps.isPackageEnabled(packageName, user)
+        } catch (e: PackageManager.NameNotFoundException) {
+            false
+        } catch (e: Exception) {
+            true
+        }
+    }
+
+    /** Whether the package manager returns [packageName] as installed for [user] right now. */
+    private fun isInstalledNow(packageName: String, user: UserHandle): Boolean = try {
+        launcherApps.getApplicationInfo(packageName, 0, user)
+        true
+    } catch (e: PackageManager.NameNotFoundException) {
+        false
+    }
+
+    override fun ownUserSerial(): Long? =
+        runCatching { userManager?.getSerialNumberForUser(Process.myUserHandle()) }.getOrNull()?.takeIf { it >= 0 }
+
+    override fun pinShortcuts(packageName: String, userSerial: Long, shortcutIds: List<String>): Boolean = try {
+        val user = availableProfile(userSerial)
+        if (user == null || !launcherApps.hasShortcutHostPermission()) {
+            false
+        } else {
+            launcherApps.pinShortcuts(packageName, shortcutIds, user)
+            true
+        }
+    } catch (e: Exception) {
+        false
+    }
+
+    /**
+     * Streams the launchable apps of every profile. [reloadSignals] re-runs the query from outside
+     * the `LauncherApps.Callback`: the profile broadcasts, since the callback never reports a profile
+     * coming, going or pausing. Each signal is one reload request (conflated with the rest).
+     */
+    fun appsFlow(reloadSignals: Flow<Unit> = emptyFlow()): Flow<List<AppItem>> = callbackFlow {
+        val handler = Handler(Looper.getMainLooper())
+
+        // One serial worker fed by a conflated trigger, NOT a coroutine per event: overlapping
+        // scans could complete out of order, leaving the flow's latest value a stale snapshot after
+        // a burst of package events (install storms, batch updates). Serializing guarantees the
+        // newest scan is emitted last; conflation coalesces the burst into one rescan.
+        val reloads = Channel<Unit>(Channel.CONFLATED)
+        fun reload() { reloads.trySend(Unit) }
+        launch(Dispatchers.IO) {
+            for (unused in reloads) scanApps { trySend(it) }
+        }
+        launch { reloadSignals.collect { reload() } }
+
+        fun packageEvent(vararg packageNames: String, iconsMayHaveChanged: Boolean = false) {
+            packageNames.forEach { packageEventPool.add(it) }
+            // The rescan below reads this package's labels again (an update may have renamed it).
+            packageNames.forEach(labelCache::invalidatePackage)
+            // An updated/replaced package bumps its icon epoch: the epoch is in the Coil model/cache
+            // key, so the changed app's icon re-fetches everywhere — including AsyncImages already on
+            // screen (dock, open home page, drawer top), which only re-launch when the model changes.
+            // A memory-cache clear alone left those painters showing the OLD icon until process death.
+            if (iconsMayHaveChanged) {
+                _iconEpochs.update { it.bump(packageNames.asIterable()) }
+            }
+            // A changed icon PACK invalidates every mapped/masked icon, not just its own package:
+            // bump the global generation (re-keys all icons) and drop the now-dead cache entries.
+            if (packageNames.any { iconPacks.invalidate(it) }) {
+                _iconEpochs.update { it.bumpGlobal() }
+                runCatching { imageLoader.get().memoryCache?.clear() }
+            }
+            reload()
+        }
+
+        val callback = object : LauncherApps.Callback() {
+            override fun onPackageAdded(packageName: String, user: UserHandle) = packageEvent(packageName)
+            override fun onPackageRemoved(packageName: String, user: UserHandle) {
+                val serial = runCatching { userManager?.getSerialNumberForUser(user) }.getOrNull() ?: 0L
+                packageRemovalPool.add(packageName to serial)
+                packageEvent(packageName)
+            }
+            override fun onPackageChanged(packageName: String, user: UserHandle) =
+                packageEvent(packageName, iconsMayHaveChanged = true)
+            override fun onPackagesAvailable(names: Array<out String>, user: UserHandle, replacing: Boolean) =
+                packageEvent(*names, iconsMayHaveChanged = replacing)
+            override fun onPackagesUnavailable(names: Array<out String>, user: UserHandle, replacing: Boolean) =
+                packageEvent(*names)
+
+            // Only the default home app receives it. Not a package event: chat apps re-publish their
+            // shortcuts on every message, and those must not rescan the app list.
+            override fun onShortcutsChanged(packageName: String, shortcuts: MutableList<ShortcutInfo>, user: UserHandle) {
+                val serial = runCatching { userManager?.getSerialNumberForUser(user) }.getOrNull() ?: 0L
+                shortcutChangePool.add(packageName to serial)
+            }
+        }
+
+        // Labels are resolved in the process locale at query time. A system-language change — or
+        // an Android 13+ per-app language switch, which recreates the activity but not this
+        // singleton — would otherwise leave the drawer, the home grid and the search index on the
+        // old language until the next package event. The application-level callback fires after
+        // the process Resources carry the new locales, so the rescan reads the new labels.
+        var locales = context.resources.configuration.locales.toLanguageTags()
+        val localeCallback = object : ComponentCallbacks {
+            override fun onConfigurationChanged(newConfig: Configuration) {
+                val now = newConfig.locales.toLanguageTags()
+                if (now != locales) {
+                    locales = now
+                    reload()
+                }
+            }
+            override fun onLowMemory() = Unit
+        }
+        context.registerComponentCallbacks(localeCallback)
+
+        launcherApps.registerCallback(callback, handler)
+        reload()
+        awaitClose {
+            launcherApps.unregisterCallback(callback)
+            context.unregisterComponentCallbacks(localeCallback)
+        }
+    }
+
+    /** A launcher activity of one profile, as a scan listed it. */
+    private class Scanned(val info: LauncherActivityInfo, val user: UserHandle, val serial: Long) {
+        val packageName: String = info.componentName.packageName
+        val key = "$packageName/${info.componentName.className}/$serial"
+    }
+
+    /**
+     * One scan of every profile's launchable apps, [send]ing the list once with the labels the
+     * [labelCache] hands out — the persisted ones at once, the rest read now — and, when the cache
+     * still has persisted labels to check (the first scan of a process), once more if any of them
+     * turned out to have changed. See [AppLabelCache] for why: reading a label opens the package's
+     * resources, and the home rows wait for this list.
+     */
+    private suspend fun scanApps(send: (List<AppItem>) -> Unit) {
+        labelCache.prepare(context.resources.configuration.locales.toLanguageTags())
+        // BEFORE the listing: the activities listed are snapshots, so a package event after this point
+        // makes any label read from them suspect (AppLabelCache.Reading).
+        val generations = labelCache.generations()
+        val profiles = runCatching { userManager?.userProfiles }.getOrNull() ?: listOf(Process.myUserHandle())
+        val scanned = profiles.flatMap { user ->
+            val serial = runCatching { userManager?.getSerialNumberForUser(user) }.getOrNull() ?: 0L
+            runCatching { launcherApps.getActivityList(null, user) }.getOrElse { emptyList() }.map { Scanned(it, user, serial) }
+        }
+        fun toItems(labelOf: (Scanned) -> String) = scanned.map { s ->
+            AppItem(
+                packageName = s.info.componentName.packageName,
+                className = s.info.componentName.className,
+                user = s.user,
+                userSerial = s.serial,
+                label = labelOf(s),
+            )
+        }.sortedBy { it.label.lowercase() }
+        // A reading carries its package's generation from the snapshot above: a package event since
+        // drops it (AppLabelCache.Reading), and the rescan the event queues reads the label again.
+        fun read(s: Scanned) = AppLabelCache.Reading(readLabel(s.info), generations[s.packageName] ?: 0)
+        val shown = HashMap<String, String>()
+        send(toItems { s ->
+            val label = labelCache.label(s.key) ?: read(s).also { labelCache.put(s.key, it.label, it.generation) }.label
+            shown[s.key] = label
+            label
+        })
+
+        labelCache.retain(scanned.mapTo(HashSet()) { it.key })
+        val unverified = labelCache.unverified()
+        if (unverified.isNotEmpty()) {
+            val fresh = scanned.filter { it.key in unverified }.associate { it.key to read(it) }
+            // A key an event overtook meanwhile has no label in the cache any more: this emission keeps
+            // what it showed, the queued rescan brings the new one.
+            if (labelCache.verify(fresh)) send(toItems { s -> labelCache.label(s.key) ?: shown[s.key].orEmpty() })
+        }
+        labelCache.persist()
+    }
+
+    /** The app's own label, read from its resources (the costly call this cache exists for). */
+    private fun readLabel(info: LauncherActivityInfo): String = info.label?.toString().orEmpty()
+
+    /**
+     * Launches [appItem], opening from [sourceBounds] (the icon on screen) with [options] (its zoom)
+     * when given. A launcher is the device's HOME, so a single failed launch (app removed mid-tap,
+     * profile locked, activity no longer launchable) must never crash the process — the error is
+     * captured in the [Result] for the caller to log or surface.
+     */
+    fun launch(appItem: AppItem, sourceBounds: Rect? = null, options: Bundle? = null): Result<Unit> = runCatching {
+        launcherApps.startMainActivity(appItem.componentName, appItem.user, sourceBounds, options)
+    }
+
+    /**
+     * The launcher entry the system lists first for [packageName] in [user] — the one the package's
+     * launch intent resolves to when it declares several MAIN/LAUNCHER activities. Resolved through
+     * [LauncherApps] so work-profile packages resolve in their own profile. Null when the package has
+     * no launcher entry or the profile is unavailable.
+     */
+    fun launchClassName(packageName: String, user: UserHandle): String? = runCatching {
+        launcherApps.getActivityList(packageName, user).firstOrNull()?.componentName?.className
+    }.getOrNull()
+
+    /**
+     * Resolves [appItem]'s icon. Like [launch], this must never crash the process (the launcher is the
+     * device HOME): the app can be removed mid-load or its profile locked, so any failure resolves to
+     * a null icon instead of propagating.
+     *
+     * A selected [iconPack] takes priority: a mapped app uses the pack's drawable, an unmapped app keeps
+     * its normal icon. Otherwise, when [themed] is set (and the device + app support it) the Material You
+     * monochrome icon is returned, tinted for the [dark]/light theme; an app without one gets a silhouette
+     * of its icon in the same colours when [themeAll] asks for it; else the normal icon.
+     */
+    fun loadIcon(
+        appItem: AppItem,
+        themed: Boolean = false,
+        dark: Boolean = false,
+        iconPack: String = "",
+        themeAll: Boolean = false,
+    ): Drawable? = runCatching {
+        val info = launcherApps.getActivityList(appItem.packageName, appItem.user)
+            .firstOrNull { it.componentName.className == appItem.className }
+            ?: return@runCatching null
+        // A selected icon pack overrides themed icons: use the pack's drawable if it maps this app,
+        // otherwise fall through to the normal icon below.
+        if (iconPack.isNotBlank()) {
+            iconPacks.get(iconPack)?.getIcon(appItem.componentName)?.let { return@runCatching it }
+        } else if (themed && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            themedIcon(info, dark)?.let { return@runCatching it }
+            if (themeAll) silhouetteThemedIcon(info, dark)?.let { return@runCatching it }
+        }
+        info.getBadgedIcon(0)
+    }.getOrNull()
+
+    /**
+     * Builds a Material You themed icon from [info]'s monochrome layer, or null if it has none (most
+     * non-Google apps). The monochrome drawable is the adaptive-icon foreground glyph; we tint it and
+     * composite it over a solid Monet-coloured background as a fresh AdaptiveIconDrawable, so the
+     * platform applies the icon mask and foreground scaling for us.
+     */
+    @RequiresApi(Build.VERSION_CODES.TIRAMISU)
+    private fun themedIcon(info: LauncherActivityInfo, dark: Boolean): Drawable? {
+        val adaptive = info.getIcon(0) as? AdaptiveIconDrawable ?: return null
+        val mono = (adaptive.monochrome ?: return null).mutate()
+        val (bg, fg) = themedColors(dark)
+        mono.setTint(fg)
+        return AdaptiveIconDrawable(ColorDrawable(bg), mono)
+    }
+
+    /**
+     * A themed icon for an app without a monochrome layer (a Telegram request, "Theme every icon"):
+     * the adaptive foreground, or the whole legacy icon inset, as a one-colour silhouette over the
+     * Monet background, so it sits among the real themed icons instead of breaking the set.
+     */
+    @RequiresApi(Build.VERSION_CODES.S)
+    private fun silhouetteThemedIcon(info: LauncherActivityInfo, dark: Boolean): Drawable? {
+        val icon = info.getIcon(0) ?: return null
+        val adaptive = icon as? AdaptiveIconDrawable
+        val glyph = adaptive?.foreground ?: icon
+        val (bg, fg) = themedColors(dark)
+        val silhouette = silhouetteDrawable(glyph, fg, adaptive = adaptive != null, resources = context.resources)
+        return AdaptiveIconDrawable(ColorDrawable(bg), silhouette)
+    }
+
+    /** Background/foreground colours for themed icons, from the system dynamic (Monet) palette. */
+    @RequiresApi(Build.VERSION_CODES.S)
+    private fun themedColors(dark: Boolean): Pair<Int, Int> = if (dark) {
+        context.getColor(android.R.color.system_neutral1_800) to
+            context.getColor(android.R.color.system_accent1_100)
+    } else {
+        context.getColor(android.R.color.system_accent1_100) to
+            context.getColor(android.R.color.system_neutral2_700)
+    }
+}

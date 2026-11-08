@@ -1,0 +1,251 @@
+package com.kich.launcher.data.smartspace
+
+import android.Manifest
+import android.annotation.SuppressLint
+import android.content.Context
+import android.content.pm.PackageManager
+import android.location.Geocoder
+import android.location.Location
+import android.location.LocationManager
+import android.os.Build
+import android.util.Log
+import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
+import com.kich.launcher.data.di.ApplicationScope
+import org.json.JSONObject
+import java.net.HttpURLConnection
+import java.net.URL
+import java.util.Locale
+import java.util.concurrent.atomic.AtomicBoolean
+import javax.inject.Inject
+import javax.inject.Singleton
+
+/** Current conditions for the smartspace widget's weather slot. */
+data class CurrentWeather(
+    val temperatureC: Double,
+    val weatherCode: Int,
+    /** Reverse-geocoded locality ("Espoo"); null when no geocoder backend or no name resolves. */
+    val city: String?,
+    val fetchedAt: Long,
+    /** [city] came from the BigDataCloud fallback — dropped the moment the user turns it off. */
+    val cityFromNetwork: Boolean = false,
+)
+
+/** How old a reading may get while every refresh fails before it is dropped: morning weather is
+ *  not the evening's. */
+internal const val WEATHER_MAX_AGE_MS = 3L * 60 * 60 * 1000
+
+/** Whether [cached] is too old to show at [now]; a clock set back never expires a reading. */
+internal fun weatherExpired(cached: CurrentWeather, now: Long): Boolean = now - cached.fetchedAt > WEATHER_MAX_AGE_MS
+
+/**
+ * Current weather from the keyless Open-Meteo API for the smartspace widget. Needs a (coarse)
+ * location permission; without one it emits null and never touches the network. Results are cached
+ * in memory and re-fetched at most every [REFRESH_INTERVAL_MS] (the widget refreshes on home resume).
+ */
+@Singleton
+class WeatherRepository @Inject constructor(
+    @ApplicationContext private val context: Context,
+    @ApplicationScope private val scope: CoroutineScope,
+) {
+    private val _weather = MutableStateFlow<CurrentWeather?>(null)
+    val weather: StateFlow<CurrentWeather?> = _weather.asStateFlow()
+
+    private val fetching = AtomicBoolean(false)
+
+    fun hasPermission(): Boolean =
+        context.checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED ||
+            context.checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+
+    /** The network-place-name setting the current [weather] was resolved with. */
+    @Volatile private var resolvedWithNetworkPlaceNames = false
+
+    /** The UI language ([Locale.getDefault] tag) the current [weather]'s place name was resolved in.
+     *  An Android 13+ app-language switch recreates the activity but not this singleton: the
+     *  30-minute freshness gate must not keep "London" on a screen that is now Finnish. */
+    @Volatile private var resolvedLanguage: String? = null
+
+    /** The user's CURRENT consent to the BigDataCloud fallback. A fetch already running reads this,
+     *  not the value it started with, right before the request and again before publishing: a
+     *  consent withdrawn meanwhile must stop it. */
+    @Volatile private var networkConsent = false
+
+    /** [networkPlaceNames]: the user allowed the BigDataCloud place-name fallback. A changed setting
+     *  re-fetches at once; turning it off also drops a network-sourced name right away, whether or
+     *  not the new weather query succeeds. */
+    fun refresh(networkPlaceNames: Boolean) {
+        networkConsent = networkPlaceNames
+        if (!networkPlaceNames) {
+            _weather.value?.takeIf { it.cityFromNetwork }?.let {
+                _weather.value = it.copy(city = null, cityFromNetwork = false)
+            }
+        }
+        if (!hasPermission()) {
+            _weather.value = null
+            return
+        }
+        // A reading no refresh has managed to replace for hours is dropped rather than shown as current.
+        _weather.value?.takeIf { weatherExpired(it, System.currentTimeMillis()) }?.let { _weather.compareAndSet(it, null) }
+        val cached = _weather.value
+        // Captured once: the geocoders, the cache key and the freshness stamp must all use the SAME
+        // language even if the user switches languages while this fetch is running.
+        val locale = Locale.getDefault()
+        val language = locale.toLanguageTag()
+        if (cached != null &&
+            System.currentTimeMillis() - cached.fetchedAt < REFRESH_INTERVAL_MS &&
+            networkPlaceNames == resolvedWithNetworkPlaceNames &&
+            language == resolvedLanguage
+        ) return
+        if (!fetching.compareAndSet(false, true)) return
+        scope.launch(Dispatchers.IO) {
+            try {
+                val location = lastKnownLocation() ?: return@launch
+                // Rounded for the network query — ~1 km is all weather needs, and the exact fix
+                // never leaves the device. The LOCAL geocoder gets the exact fix (rounding cost
+                // real municipalities near borders); see cityName().
+                val exactLat = location.latitude
+                val exactLon = location.longitude
+                val lat = Math.round(exactLat * 100) / 100.0
+                val lon = Math.round(exactLon * 100) / 100.0
+                runCatching { fetch(lat, lon) }.getOrNull()?.let {
+                    val consent = networkConsent
+                    val place = resolveCity(exactLat, exactLon, lat, lon, consent, locale)
+                        ?.takeIf { p -> !p.fromNetwork || networkConsent }
+                    resolvedWithNetworkPlaceNames = consent
+                    resolvedLanguage = language
+                    _weather.value = it.copy(city = place?.name, cityFromNetwork = place?.fromNetwork == true)
+                }
+            } finally {
+                fetching.set(false)
+            }
+        }
+    }
+
+    /** A cached fix is plenty for weather — no active location request, no battery cost. */
+    @SuppressLint("MissingPermission")
+    private fun lastKnownLocation(): Location? {
+        val lm = context.getSystemService(LocationManager::class.java) ?: return null
+        val providers = buildList {
+            if (Build.VERSION.SDK_INT >= 31) add(LocationManager.FUSED_PROVIDER)
+            add(LocationManager.NETWORK_PROVIDER)
+            add(LocationManager.PASSIVE_PROVIDER)
+            add(LocationManager.GPS_PROVIDER)
+        }
+        // Newest fix wins regardless of provider — provider order alone let a stale network fix
+        // beat a fresh GPS one and pin the weather to a previous town.
+        return providers
+            .mapNotNull { runCatching { lm.getLastKnownLocation(it) }.getOrNull() }
+            .maxByOrNull { it.time }
+    }
+
+    /** App-identifying User-Agent WITHOUT device details — Android's default Dalvik UA names the
+     *  device model and OS build, which has no business going to third-party weather services. */
+    private val userAgent: String by lazy {
+        val version = runCatching {
+            context.packageManager.getPackageInfo(context.packageName, 0).versionName
+        }.getOrNull() ?: "?"
+        "ARK-launcher/$version"
+    }
+
+    private fun fetch(lat: Double, lon: Double): CurrentWeather? {
+        val url = URL(
+            "https://api.open-meteo.com/v1/forecast?latitude=%.2f&longitude=%.2f&current=temperature_2m,weather_code"
+                .format(Locale.US, lat, lon),
+        )
+        val connection = url.openConnection() as HttpURLConnection
+        return try {
+            connection.setRequestProperty("User-Agent", userAgent)
+            connection.connectTimeout = 10_000
+            connection.readTimeout = 10_000
+            val body = connection.inputStream.bufferedReader().use { it.readText() }
+            val current = JSONObject(body).getJSONObject("current")
+            CurrentWeather(
+                temperatureC = current.getDouble("temperature_2m"),
+                weatherCode = current.getInt("weather_code"),
+                city = null,
+                fetchedAt = System.currentTimeMillis(),
+            )
+        } finally {
+            connection.disconnect()
+        }
+    }
+
+    /** Guarded by the [fetching] gate (single writer). */
+    private val placeNames = PlaceNameCache(CITY_CACHE_MAX_AGE_MS)
+
+    private fun resolveCity(
+        exactLat: Double, exactLon: Double, roundedLat: Double, roundedLon: Double, networkPlaceNames: Boolean,
+        locale: Locale,
+    ): PlaceName? = placeNames.resolve(
+        areaKey = placeAreaKey(roundedLat, roundedLon, locale.toLanguageTag()),
+        local = { cityName(exactLat, exactLon, locale) },
+        // Re-checked right before the request: the local geocoder may have taken a while.
+        network = if (networkPlaceNames) ({ if (networkConsent) networkCityName(roundedLat, roundedLon, locale) else null }) else null,
+    )
+
+    /** Locality via the platform Geocoder — works worldwide on devices with a geocoder backend
+     *  (localized names); null elsewhere. Checks several results and fields: older OEM backends
+     *  (e.g. Samsung A40) may leave locality empty and put the usable name in another field.
+     *  The sync call is fine on this IO thread. Logs never include coordinates. */
+    private fun cityName(lat: Double, lon: Double, locale: Locale): String? {
+        if (!Geocoder.isPresent()) {
+            Log.d(TAG, "Reverse geocoding skipped: no geocoder backend")
+            return null
+        }
+        return try {
+            @Suppress("DEPRECATION")
+            val addresses = Geocoder(context, locale).getFromLocation(lat, lon, 3).orEmpty()
+            if (addresses.isEmpty()) {
+                Log.d(TAG, "Reverse geocoding returned no addresses")
+                return null
+            }
+            val name = addresses.firstNotNullOfOrNull { a ->
+                PlaceNames.preferred(listOf(a.locality, a.subLocality, a.subAdminArea, a.adminArea, a.featureName))
+            }
+            if (name == null) Log.d(TAG, "Reverse geocoding found no usable name field")
+            name
+        } catch (e: Exception) {
+            Log.w(TAG, "Reverse geocoding failed: ${e.javaClass.simpleName}")
+            null
+        }
+    }
+
+    /** Network reverse-geocode fallback for devices whose platform Geocoder has no usable backend
+     *  (the Samsung A40 symptom): BigDataCloud's keyless client API. Client-side calls with the
+     *  device's own current fix are exactly its permitted use. Sends only the SAME 2-decimal
+     *  rounded coordinates the weather query already sends — the exact fix never leaves the device.
+     *  Reached only when the user turned the setting on, at most once per 30-min weather refresh,
+     *  and only when the local geocoder failed. */
+    private fun networkCityName(roundedLat: Double, roundedLon: Double, locale: Locale): String? {
+        val url = URL(
+            "https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=%.2f&longitude=%.2f&localityLanguage=%s"
+                .format(Locale.US, roundedLat, roundedLon, locale.language),
+        )
+        val connection = url.openConnection() as HttpURLConnection
+        return try {
+            connection.setRequestProperty("User-Agent", userAgent)
+            connection.connectTimeout = 10_000
+            connection.readTimeout = 10_000
+            val body = connection.inputStream.bufferedReader().use { it.readText() }
+            PlaceNameFallback.parseCity(body).also {
+                if (it == null) Log.d(TAG, "Network reverse geocoding found no usable name")
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Network reverse geocoding failed: ${e.javaClass.simpleName}")
+            null
+        } finally {
+            connection.disconnect()
+        }
+    }
+
+    companion object {
+        private const val REFRESH_INTERVAL_MS = 30L * 60 * 1000
+        private const val CITY_CACHE_MAX_AGE_MS = 24L * 60 * 60 * 1000
+        private const val TAG = "WeatherRepo"
+    }
+}

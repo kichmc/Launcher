@@ -1,0 +1,104 @@
+package com.kich.launcher.feature.home
+
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.dp
+import com.kich.launcher.model.AppItem
+import com.kich.launcher.model.CustomIcon
+import com.kich.launcher.ui.component.AppIcon
+import com.kich.launcher.ui.component.AppLabel
+import com.kich.launcher.ui.component.NotificationBadge
+import com.kich.launcher.ui.component.PickedIcon
+
+/**
+ * A home-screen folder: a rounded tile showing a 2×2 preview of the first four contained app icons
+ * — or the [customIcon] the user picked for it instead — an optional label, and a notification badge
+ * (aggregated from its contents). With [showName] off the label block stays (the tile keeps its place
+ * beside the app icons) but shows no name (issue #17); the preview then carries the name for TalkBack,
+ * so hiding the text never hides the folder from an accessibility user.
+ */
+@Composable
+fun FolderIcon(
+    name: String,
+    apps: List<AppItem>,
+    showLabel: Boolean,
+    badgeCount: Int,
+    badgeShowCount: Boolean,
+    badgeScale: Float = 1f,
+    labelColor: Color = Color.White,
+    size: Dp = 52.dp,
+    modifier: Modifier = Modifier,
+    customIcon: CustomIcon? = null,
+    showName: Boolean = true,
+) {
+    // The label speaks the name while it is on screen; without one (names or labels off) the preview
+    // does, once. A picked icon describes itself (PickedIcon), its fallback preview like any other.
+    val spokenName = if (showLabel && showName) null else name
+    Column(modifier = modifier, horizontalAlignment = Alignment.CenterHorizontally) {
+        Box(contentAlignment = Alignment.TopEnd) {
+            if (customIcon != null) {
+                // Its pack uninstalled or its picture gone: the preview again, never a blank tile.
+                PickedIcon(customIcon, size, contentDescription = name, fallback = { FolderPreview(apps, size, spokenName) })
+            } else {
+                FolderPreview(apps, size, spokenName)
+            }
+            NotificationBadge(count = badgeCount, showCount = badgeShowCount, scale = badgeScale)
+        }
+        // Home-only tile in a fixed centred cell: reserve the full label block (see AppLabel).
+        if (showLabel) AppLabel(if (showName) name else "", labelColor, reserveLines = true)
+    }
+}
+
+/** The folder's 2×2 preview of its first four apps, described as [contentDescription] when given. */
+@Composable
+private fun FolderPreview(apps: List<AppItem>, size: Dp, contentDescription: String?) {
+    // EVERYTHING inside scales with the tile — padding and gap included. A fixed padding/gap
+    // with linearly scaled icons inverted the margin below ~45dp tiles (6–7 columns on a
+    // narrow screen), squeezing the 2×2 preview asymmetrically out of its card.
+    val scale = size / 52.dp
+    Box(
+        modifier = Modifier
+            .size(size)
+            .then(if (contentDescription == null) Modifier else Modifier.semantics { this.contentDescription = contentDescription })
+            .background(Color.White.copy(alpha = 0.22f), RoundedCornerShape(15.dp))
+            .padding(6.dp * scale),
+        contentAlignment = Alignment.Center,
+    ) {
+        val mini = 17.dp * scale
+        Column(verticalArrangement = Arrangement.spacedBy(2.dp * scale)) {
+            PreviewRow(apps.getOrNull(0), apps.getOrNull(1), mini, gap = 2.dp * scale)
+            PreviewRow(apps.getOrNull(2), apps.getOrNull(3), mini, gap = 2.dp * scale)
+        }
+    }
+}
+
+@Composable
+private fun PreviewRow(left: AppItem?, right: AppItem?, size: Dp, gap: Dp = 2.dp) {
+    Row(horizontalArrangement = Arrangement.spacedBy(gap)) {
+        PreviewSlot(left, size)
+        PreviewSlot(right, size)
+    }
+}
+
+@Composable
+private fun PreviewSlot(app: AppItem?, size: Dp) {
+    if (app == null) {
+        Spacer(Modifier.size(size))
+    } else {
+        AppIcon(appItem = app, labelColor = Color.Transparent, showLabel = false, iconSize = size)
+    }
+}

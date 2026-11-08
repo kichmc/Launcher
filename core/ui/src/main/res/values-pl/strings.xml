@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="rename_label">Nazwa</string>
+    <string name="rename_save">Zapisz</string>
+    <string name="rename_cancel">Anuluj</string>
+    <string name="rename_reset">Przywróć domyślną nazwę</string>
+    <string name="shortcut_pin">Przypnij do ekranu głównego</string>
+    <string name="shortcut_unavailable">Skrót nie jest dostępny</string>
+    <string name="app_info_unavailable">Nie udało się otworzyć informacji o aplikacji</string>
+    <string name="home_full">Ekran główny jest pełny</string>
+    <string name="folder_default_name">Folder</string>
+    <string name="popup_widgets">Widżety</string>
+    <string name="notice_work_apps_need_default">Ustaw Kich Launcher jako domyślny launcher, aby wstrzymać aplikacje służbowe.</string>
+    <string name="edit_title">Edytuj</string>
+    <string name="edit_icon_hint">Dotknij ikony, aby ją zmienić</string>
+    <string name="edit_swipe_up">Przeciągnięcie w górę otwiera</string>
+    <string name="edit_swipe_up_none">Nic</string>
+    <string name="edit_swipe_up_none_option">Nic (zwykły gest)</string>
+    <string name="icon_change">Zmień ikonę</string>
+    <string name="icon_picker_title">Wybierz ikonę</string>
+    <string name="icon_picker_close">Zamknij</string>
+    <string name="icon_picker_back">Wstecz</string>
+    <string name="icon_original">Oryginalna ikona</string>
+    <string name="icon_from_gallery">Wybierz z galerii</string>
+    <string name="icon_packs">Pakiety ikon</string>
+    <string name="icon_packs_none">Brak zainstalowanych pakietów ikon. Zainstaluj pakiet ze sklepu z aplikacjami, aby używać tu jego ikon.</string>
+    <string name="icon_search">Szukaj ikon</string>
+    <string name="icon_suggested">Sugerowana</string>
+    <string name="icon_picture_failed">Tego obrazu nie można użyć jako ikony.</string>
+</resources>

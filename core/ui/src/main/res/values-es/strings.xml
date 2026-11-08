@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="rename_label">Nombre</string>
+    <string name="rename_save">Guardar</string>
+    <string name="rename_cancel">Cancelar</string>
+    <string name="rename_reset">Restablecer</string>
+    <string name="shortcut_pin">Fijar en la pantalla de inicio</string>
+    <string name="shortcut_unavailable">Acceso directo no disponible</string>
+    <string name="app_info_unavailable">No se pudo abrir la información de la aplicación</string>
+    <string name="home_full">La pantalla de inicio está llena</string>
+    <string name="folder_default_name">Carpeta</string>
+    <string name="popup_widgets">Widgets</string>
+    <string name="notice_work_apps_need_default">Establece Kich Launcher como launcher predeterminado para pausar las aplicaciones de trabajo.</string>
+    <string name="edit_title">Editar</string>
+    <string name="edit_icon_hint">Toca el icono para cambiarlo</string>
+    <string name="edit_swipe_up">Deslizar hacia arriba abre</string>
+    <string name="edit_swipe_up_none">Nada</string>
+    <string name="edit_swipe_up_none_option">Nada (el gesto habitual)</string>
+    <string name="icon_change">Cambiar icono</string>
+    <string name="icon_picker_title">Elegir icono</string>
+    <string name="icon_picker_close">Cerrar</string>
+    <string name="icon_picker_back">Atrás</string>
+    <string name="icon_original">Icono original</string>
+    <string name="icon_from_gallery">Elegir de la galería</string>
+    <string name="icon_packs">Paquetes de iconos</string>
+    <string name="icon_packs_none">No hay paquetes de iconos instalados. Instala uno desde tu tienda de aplicaciones para usar sus iconos aquí.</string>
+    <string name="icon_search">Buscar iconos</string>
+    <string name="icon_suggested">Sugerido</string>
+    <string name="icon_picture_failed">Esa imagen no se puede usar como icono.</string>
+</resources>

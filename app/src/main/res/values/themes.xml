@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Transparent, wallpaper-showing launcher window. Compose draws the actual UI. -->
+    <style name="Theme.KichLauncher" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowShowWallpaper">true</item>
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+    </style>
+
+    <!-- The HOME window only (handed over after the splash): translucent in the window's own eyes, because
+         the decor draws the wallpaper blur behind the rising app drawer (Settings > App drawer) only for a
+         window that says so. Settings keeps the opaque theme above: a translucent Settings would leave the
+         launcher started underneath, its foreground flag never reset, and the next HOME press would jump to
+         the home page instead of staying on the page the user left. -->
+    <style name="Theme.KichLauncher.Home">
+        <item name="android:windowIsTranslucent">true</item>
+    </style>
+
+    <!-- See-through window for the confirmation another app's "Add to home screen" opens: the
+         requesting app stays visible behind the sheet's scrim. Compose draws the sheet. -->
+    <style name="Theme.KichLauncher.Translucent" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowIsTranslucent">true</item>
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:windowAnimationStyle">@null</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+    </style>
+
+    <!-- Splash screen shown on cold start, then hands off to the launcher theme. -->
+    <style name="Theme.KichLauncher.Starting" parent="Theme.SplashScreen">
+        <item name="windowSplashScreenBackground">@color/splash_background</item>
+        <item name="windowSplashScreenAnimatedIcon">@mipmap/ic_launcher_foreground</item>
+        <item name="postSplashScreenTheme">@style/Theme.KichLauncher.Home</item>
+    </style>
+</resources>

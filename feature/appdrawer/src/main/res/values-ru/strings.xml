@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_drawer_search_hint">Поиск приложений</string>
+    <string name="add_to_dock">Добавить на док-панель</string>
+    <string name="remove_from_dock">Убрать с док-панели</string>
+    <string name="add_to_home">Добавить на главный экран</string>
+    <string name="remove_from_home">Убрать с главного экрана</string>
+    <string name="app_info">О приложении</string>
+    <string name="hide_app">Скрыть приложение</string>
+    <string name="rename">Изменить</string>
+    <string name="uninstall">Удалить</string>
+    <string name="folder_name_label">Название папки</string>
+    <string name="folder_add_apps">Добавить приложения</string>
+    <string name="folder_delete">Удалить папку</string>
+    <string name="folder_remove_hint">Нажмите и удерживайте приложение, чтобы убрать его из папки</string>
+    <string name="folder_add">Добавить</string>
+    <string name="folder_cancel">Отмена</string>
+    <string name="folder_card_empty">Пустая папка. Удерживайте её, чтобы добавить приложения.</string>
+    <string name="folder_delete_title">Удалить папку?</string>
+    <string name="folder_delete_text">«%1$s» будет удалена. Её приложения останутся в списке приложений.</string>
+    <string name="folder_delete_confirm">Удалить</string>
+    <string name="folder_move_earlier">Переместить папку вперёд</string>
+    <string name="folder_move_later">Переместить папку назад</string>
+    <string name="folder_edit">Изменить папку</string>
+    <string name="folder_move_label">Переместить папку</string>
+    <string name="search_section_apps">Приложения</string>
+    <string name="search_section_settings">Настройки</string>
+    <string name="search_section_contacts">Контакты</string>
+    <string name="search_calc_copied">Скопировано в буфер обмена</string>
+    <string name="search_contact_call">Позвонить</string>
+    <string name="search_contact_message">Написать</string>
+    <string name="drawer_frequent_apps">Часто используемые</string>
+    <string name="search_clear">Очистить запрос</string>
+    <string name="search_no_results">Ничего не найдено</string>
+    <string name="drawer_tab_personal">Личные</string>
+    <string name="drawer_tab_work">Рабочие</string>
+    <string name="work_apps_pause">Приостановить рабочие приложения</string>
+    <string name="work_apps_unpause">Возобновить</string>
+    <string name="work_apps_paused_title">Рабочие приложения приостановлены</string>
+    <string name="work_apps_paused_body">Рабочие приложения не могут отправлять уведомления, расходовать заряд батареи и получать доступ к вашему местоположению.</string>
+</resources>

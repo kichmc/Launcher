@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="backup_title">Säkerhetskopiering</string>
+    <string name="backup_file_section">Fil</string>
+    <string name="backup_export">Exportera till fil</string>
+    <string name="backup_import">Importera från fil</string>
+    <string name="backup_default_name">Kich Launcher-backup</string>
+    <string name="backup_exported">Säkerhetskopian har sparats</string>
+    <string name="backup_restored">Säkerhetskopian har återställts</string>
+    <plurals name="backup_restored_skipped">
+        <item quantity="one">Säkerhetskopian har återställts — %1$d hoppades över (inte installerad)</item>
+        <item quantity="other">Säkerhetskopian har återställts — %1$d hoppades över (inte installerade)</item>
+    </plurals>
+    <string name="backup_import_invalid">Ogiltig eller inkompatibel säkerhetskopia</string>
+    <string name="backup_error_too_large">Säkerhetskopian är för stor</string>
+    <string name="backup_failed">Åtgärden misslyckades</string>
+    <string name="backup_import_read_blocked">Androids lagringstjänst blockerade läsningen av den här filen. Välj den under Nedladdningar i stället för i telefonens lagringsmappar, eller öppna den med Kich Launcher från en annan filhanterarapp.</string>
+    <string name="backup_import_timeout">Filen öppnades inte i tid. Försök igen eller välj den under Nedladdningar eller i en annan filhanterarapp.</string>
+    <string name="backup_open_with_label">Återställ i Kich Launcher</string>
+    <string name="backup_restoring">Återställer…</string>
+    <string name="backup_restore_confirm_title">Vill du återställa säkerhetskopian?</string>
+    <string name="backup_restore_confirm_msg">Din nuvarande startskärm och dina inställningar ersätts. Widgetar återställs som platshållare – tryck på dem för att konfigurera.</string>
+    <string name="backup_restore_confirm_ok">Återställ</string>
+    <string name="backup_cancel">Avbryt</string>
+    <string name="backup_last_time">Senast: %1$s</string>
+</resources>
