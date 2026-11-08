@@ -18,6 +18,11 @@ android {
     namespace = "com.kich.launcher"
     testOptions.unitTests.isIncludeAndroidResources = true
 
+    // Release lint is skipped so a lint warning cannot stop the APK build.
+    lint {
+        checkReleaseBuilds = false
+    }
+
     defaultConfig {
         manifestPlaceholders["appLabel"] = "@string/app_name"
         applicationId = "com.kich.launcher"

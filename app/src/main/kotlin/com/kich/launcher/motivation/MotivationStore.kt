@@ -63,6 +63,28 @@ class MotivationStore(context: Context) {
         return pool[Math.floorMod(seed + offset, pool.size.toLong()).toInt()]
     }
 
+    /** Everything the user set (interval, favorites-only, own quotes, favorites) as one JSON text. */
+    fun exportJson(): String = org.json.JSONObject()
+        .put("interval", intervalMinutes)
+        .put("favoritesOnly", favoritesOnly)
+        .put("custom", JSONArray(customQuotes()))
+        .put("favorites", JSONArray(favorites()))
+        .toString()
+
+    /** Restores [json] from [exportJson]; false (and nothing changed) when it is not valid. */
+    fun importJson(json: String): Boolean = runCatching {
+        val obj = org.json.JSONObject(json)
+        val interval = obj.getInt("interval")
+        require(interval in INTERVALS)
+        val custom = obj.getJSONArray("custom").let { a -> List(a.length()) { a.getString(it).trim().take(MAX_LENGTH) } }
+        val favs = obj.getJSONArray("favorites").let { a -> List(a.length()) { a.getString(it).trim().take(MAX_LENGTH) } }
+        intervalMinutes = interval
+        favoritesOnly = obj.getBoolean("favoritesOnly")
+        writeList(KEY_CUSTOM, custom.filter { it.isNotEmpty() }.distinct())
+        writeList(KEY_FAVORITES, favs.filter { it.isNotEmpty() }.distinct())
+        true
+    }.getOrDefault(false)
+
     private fun readList(key: String): List<String> = runCatching {
         val array = JSONArray(prefs.getString(key, "[]"))
         List(array.length()) { array.getString(it) }

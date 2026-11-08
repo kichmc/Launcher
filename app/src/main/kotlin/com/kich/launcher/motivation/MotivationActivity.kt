@@ -1,5 +1,7 @@
 package com.kich.launcher.motivation
 
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -61,6 +63,7 @@ private fun MotivationScreen() {
     val store = remember { MotivationStore(context) }
     var version by remember { mutableStateOf(0) }
     var draft by remember { mutableStateOf("") }
+    var backupMessage by remember { mutableStateOf<Int?>(null) }
 
     fun changed() {
         version++
@@ -170,6 +173,32 @@ private fun MotivationScreen() {
             quotes = favorites,
             onRemove = { store.removeFavorite(it); changed() },
         )
+
+        Text(stringResource(R.string.motivation_backup_title), style = MaterialTheme.typography.titleMedium)
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
+            OutlinedButton(
+                onClick = {
+                    val clipboard = context.getSystemService(ClipboardManager::class.java)
+                    clipboard?.setPrimaryClip(ClipData.newPlainText("Kich quotes", store.exportJson()))
+                    backupMessage = R.string.motivation_backup_copied
+                },
+                modifier = Modifier.weight(1f).heightIn(min = 52.dp),
+            ) { Text(stringResource(R.string.motivation_backup_copy)) }
+            OutlinedButton(
+                onClick = {
+                    val clipboard = context.getSystemService(ClipboardManager::class.java)
+                    val text = clipboard?.primaryClip?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.text?.toString().orEmpty()
+                    if (store.importJson(text)) {
+                        backupMessage = R.string.motivation_backup_restored
+                        changed()
+                    } else {
+                        backupMessage = R.string.motivation_backup_invalid
+                    }
+                },
+                modifier = Modifier.weight(1f).heightIn(min = 52.dp),
+            ) { Text(stringResource(R.string.motivation_backup_paste)) }
+        }
+        backupMessage?.let { Text(stringResource(it), style = MaterialTheme.typography.bodyMedium) }
 
         Text(
             stringResource(R.string.motivation_note),

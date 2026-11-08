@@ -210,4 +210,6 @@
     <string name="settings_about_name">Kich Launcher</string>
     <string name="settings_about_version">Version %1$s</string>
     <string name="settings_about_credit">Based on ARK Launcher, licensed under the Apache License 2.0.</string>
+    <string name="settings_widgets">Widgets</string>
+    <string name="settings_widgets_hint">Long-press the home screen to add, move, resize or remove widgets. The Motivation widget is in the widget list under Kich Launcher.</string>
 </resources>

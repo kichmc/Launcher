@@ -4,6 +4,9 @@ import android.os.Build
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Shapes
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.unit.dp
 import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.runtime.Composable
@@ -44,6 +47,7 @@ fun LauncherTheme(
         MaterialTheme(
             colorScheme = themed,
             typography = typography,
+            shapes = OneUiShapes,
             content = content,
         )
     }
@@ -62,3 +66,12 @@ private fun ColorScheme.withAccent(accent: Color, dark: Boolean): ColorScheme {
         surfaceTint = accent,
     )
 }
+
+/** Large, soft corners for every Material surface, in the spirit of Samsung One UI. */
+private val OneUiShapes = Shapes(
+    extraSmall = RoundedCornerShape(10.dp),
+    small = RoundedCornerShape(16.dp),
+    medium = RoundedCornerShape(22.dp),
+    large = RoundedCornerShape(28.dp),
+    extraLarge = RoundedCornerShape(36.dp),
+)

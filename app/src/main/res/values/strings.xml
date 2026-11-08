@@ -40,4 +40,10 @@
     <string name="wallpaper_launcher_removed">Launcher wallpaper removed. Your phone\'s wallpaper shows again.</string>
     <string name="wallpaper_launcher_note">Shown only behind Kich Launcher\'s home screen. The One UI wallpaper stays as it is.</string>
     <string name="wallpaper_system_heading">Phone wallpaper (changes your One UI wallpaper)</string>
+    <string name="motivation_backup_title">Backup</string>
+    <string name="motivation_backup_copy">Copy my quotes</string>
+    <string name="motivation_backup_paste">Restore from copy</string>
+    <string name="motivation_backup_copied">Copied. Paste it into a note to keep it safe.</string>
+    <string name="motivation_backup_restored">Restored.</string>
+    <string name="motivation_backup_invalid">The copied text is not a Kich quotes backup.</string>
 </resources>

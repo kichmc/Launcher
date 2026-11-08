@@ -384,13 +384,6 @@ fun SettingsScreen(
                         s.hideSystemStatusBar,
                         viewModel::setHideSystemStatusBar,
                     )
-                    SwitchRow(stringResource(R.string.settings_widget_tonal), s.widgetTonalBackground, viewModel::setWidgetTonalBackground)
-                    SwitchRow(
-                        stringResource(R.string.settings_widget_inset),
-                        stringResource(R.string.settings_widget_inset_desc),
-                        s.widgetEdgesAlignWithIcons,
-                        viewModel::setWidgetEdgesAlignWithIcons,
-                    )
                     WeatherToggle(enabled = s.showWeather, onSetEnabled = viewModel::setShowWeather)
                     if (s.showWeather) {
                         WeatherAppRow(appLabel = allApps.firstOrNull { it.key == s.weatherAppKey }?.label) {
@@ -584,6 +577,25 @@ fun SettingsScreen(
                         label = stringResource(R.string.settings_backup),
                         description = "",
                     ) { showBackup = true }
+                }
+
+                CollapsibleSection(
+                    title = stringResource(R.string.settings_widgets),
+                    collapsed = "widgets" in s.collapsedSettingsSections,
+                    onToggle = { viewModel.setSectionCollapsed("widgets", it) },
+                ) {
+                    SwitchRow(stringResource(R.string.settings_widget_tonal), s.widgetTonalBackground, viewModel::setWidgetTonalBackground)
+                    SwitchRow(
+                        stringResource(R.string.settings_widget_inset),
+                        stringResource(R.string.settings_widget_inset_desc),
+                        s.widgetEdgesAlignWithIcons,
+                        viewModel::setWidgetEdgesAlignWithIcons,
+                    )
+                    Text(
+                        stringResource(R.string.settings_widgets_hint),
+                        style = androidx.compose.material3.MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                    )
                 }
 
                 CollapsibleSection(

@@ -10,6 +10,7 @@ import androidx.room.Room
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 import coil3.ImageLoader
+import coil3.memory.MemoryCache
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -94,6 +95,8 @@ object DataModule {
         source: LauncherAppsSource,
         custom: CustomIconSource,
     ): ImageLoader = ImageLoader.Builder(context)
+        // A smaller in-memory icon cache than Coil's default: easier on low-RAM phones.
+        .memoryCache { MemoryCache.Builder().maxSizePercent(context, 0.12).build() }
         .components {
             add(AppIconKeyer())
             add(AppIconFetcher.Factory(source, custom))
