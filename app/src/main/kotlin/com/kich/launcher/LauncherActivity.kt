@@ -4,6 +4,7 @@ import com.kich.launcher.feature.home.LauncherWidgetHost
 import com.kich.launcher.feature.home.LocalWidgetReconfigureLauncher
 import android.appwidget.AppWidgetHost
 import android.content.Intent
+import androidx.compose.foundation.layout.fillMaxSize
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -86,10 +87,13 @@ class LauncherActivity : ComponentActivity() {
                     LocalAppLaunchSources provides launchSources,
                     LocalIconChoices provides iconChoices,
                 ) {
-                    LauncherShell(
-                        homeSignals = homeSignals,
-                        onOpenSettings = { startActivity(Intent(this, SettingsActivity::class.java)) },
-                    )
+                    androidx.compose.foundation.layout.Box(androidx.compose.ui.Modifier.fillMaxSize()) {
+                        com.kich.launcher.wallpaper.LauncherWallpaperLayer()
+                        LauncherShell(
+                            homeSignals = homeSignals,
+                            onOpenSettings = { startActivity(Intent(this@LauncherActivity, SettingsActivity::class.java)) },
+                        )
+                    }
                 }
             }
         }

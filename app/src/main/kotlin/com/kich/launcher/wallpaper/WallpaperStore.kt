@@ -104,6 +104,20 @@ class WallpaperStore(context: Context) {
         null
     }
 
+    /**
+     * Saves [bitmap] as the launcher's OWN wallpaper: drawn behind the home screen by Kich
+     * Launcher itself. The phone's system (One UI) wallpaper is not touched.
+     */
+    fun saveLauncherWallpaper(bitmap: Bitmap): Boolean = runCatching {
+        launcherFile(appContext).outputStream().use { bitmap.compress(Bitmap.CompressFormat.JPEG, 92, it) }
+    }.getOrDefault(false)
+
+    fun hasLauncherWallpaper(): Boolean = launcherFile(appContext).exists()
+
+    fun clearLauncherWallpaper() {
+        launcherFile(appContext).delete()
+    }
+
     /** True when the system allows apps to change the wallpaper (managed devices may forbid it). */
     fun canSetWallpaper(): Boolean {
         val manager = WallpaperManager.getInstance(appContext)
@@ -118,10 +132,20 @@ class WallpaperStore(context: Context) {
         true
     }.getOrDefault(false)
 
-    private companion object {
-        const val FILE_NAME = "wallpaper_selected.jpg"
-        const val PREFS = "kich_wallpaper"
-        const val KEY_TARGET = "target"
-        const val KEY_APPLIED_AT = "applied_at"
+    companion object {
+        private fun launcherFile(context: Context) = File(context.applicationContext.filesDir, LAUNCHER_FILE_NAME)
+
+        /** The launcher's own wallpaper, decoded; null when none is set. Blocking: call off the main thread. */
+        fun loadLauncherWallpaper(context: Context): Bitmap? {
+            val file = launcherFile(context)
+            if (!file.exists()) return null
+            return runCatching { BitmapFactory.decodeFile(file.absolutePath) }.getOrNull()
+        }
+
+        private const val LAUNCHER_FILE_NAME = "launcher_wallpaper.jpg"
+        private const val FILE_NAME = "wallpaper_selected.jpg"
+        private const val PREFS = "kich_wallpaper"
+        private const val KEY_TARGET = "target"
+        private const val KEY_APPLIED_AT = "applied_at"
     }
 }

@@ -25,6 +25,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -78,6 +79,7 @@ private fun WallpaperScreen() {
     var busy by remember { mutableStateOf(false) }
     var errorDetail by remember { mutableStateOf<String?>(null) }
     var target by remember { mutableStateOf(store.lastTarget) }
+    var hasLauncher by remember { mutableStateOf(store.hasLauncherWallpaper()) }
 
     // The remembered selection comes back on every start.
     androidx.compose.runtime.LaunchedEffect(Unit) {
@@ -166,6 +168,43 @@ private fun WallpaperScreen() {
                 style = MaterialTheme.typography.bodyMedium,
             )
         }
+
+        Button(
+            onClick = {
+                val bitmap = preview
+                if (bitmap != null) {
+                    busy = true
+                    scope.launch {
+                        val ok = withContext(Dispatchers.IO) { store.saveLauncherWallpaper(bitmap) }
+                        hasLauncher = store.hasLauncherWallpaper()
+                        errorDetail = null
+                        status = if (ok) R.string.wallpaper_launcher_applied else R.string.wallpaper_error_apply
+                        busy = false
+                    }
+                }
+            },
+            enabled = preview != null && !busy,
+            modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp),
+        ) { Text(stringResource(R.string.wallpaper_launcher_set)) }
+
+        OutlinedButton(
+            onClick = {
+                store.clearLauncherWallpaper()
+                hasLauncher = false
+                errorDetail = null
+                status = R.string.wallpaper_launcher_removed
+            },
+            enabled = hasLauncher && !busy,
+            modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp),
+        ) { Text(stringResource(R.string.wallpaper_launcher_remove)) }
+
+        Text(
+            stringResource(R.string.wallpaper_launcher_note),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+
+        Text(stringResource(R.string.wallpaper_system_heading), style = MaterialTheme.typography.titleMedium)
 
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
             val enabled = preview != null && !busy && canSet

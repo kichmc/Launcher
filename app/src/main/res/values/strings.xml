@@ -34,4 +34,10 @@
     <string name="motivation_remove">Remove</string>
     <string name="motivation_none">Nothing here yet.</string>
     <string name="motivation_note">Add the Motivation widget from the home screen widget picker. Android refreshes widgets at most every 30 minutes, so a change can take a little while to show.</string>
+    <string name="wallpaper_launcher_set">Set for Kich Launcher only</string>
+    <string name="wallpaper_launcher_remove">Remove launcher wallpaper</string>
+    <string name="wallpaper_launcher_applied">Launcher wallpaper set. Your phone\'s own wallpaper was not changed.</string>
+    <string name="wallpaper_launcher_removed">Launcher wallpaper removed. Your phone\'s wallpaper shows again.</string>
+    <string name="wallpaper_launcher_note">Shown only behind Kich Launcher\'s home screen. The One UI wallpaper stays as it is.</string>
+    <string name="wallpaper_system_heading">Phone wallpaper (changes your One UI wallpaper)</string>
 </resources>
