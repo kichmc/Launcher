@@ -66,7 +66,8 @@
     <string name="motivation_font_serif">Serif</string>
     <string name="motivation_font_sans">Sans</string>
     <string name="motivation_font_mono">Mono</string>
-    <string name="motivation_size_title">Text size (biggest allowed)</string>
+    <string name="motivation_size_title">Text size</string>
+    <string name="motivation_size_auto">Auto</string>
     <string name="motivation_size_small">Small</string>
     <string name="motivation_size_medium">Medium</string>
     <string name="motivation_size_large">Large</string>

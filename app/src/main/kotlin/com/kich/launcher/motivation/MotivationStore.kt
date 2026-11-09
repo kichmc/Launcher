@@ -44,10 +44,10 @@ class MotivationStore(context: Context) {
         get() = prefs.getInt(KEY_FONT, 0).coerceIn(0, 2)
         set(value) = prefs.edit().putInt(KEY_FONT, value.coerceIn(0, 2)).apply()
 
-    /** 0 small, 1 medium, 2 large: the biggest size the quote may use; it still shrinks to fit. */
-    var textScale: Int
-        get() = prefs.getInt(KEY_TEXT_SCALE, 1).coerceIn(0, 2)
-        set(value) = prefs.edit().putInt(KEY_TEXT_SCALE, value.coerceIn(0, 2)).apply()
+    /** Quote text size: 0 Auto (fits the space), 1 small, 2 medium, 3 large. */
+    var textSize: Int
+        get() = prefs.getInt(KEY_TEXT_SIZE, 2).coerceIn(0, 3)
+        set(value) = prefs.edit().putInt(KEY_TEXT_SIZE, value.coerceIn(0, 3)).apply()
 
     /** 0 automatic (by background brightness), 1 light text, 2 dark text. */
     var textMode: Int
@@ -71,7 +71,7 @@ class MotivationStore(context: Context) {
     fun resetStyle() {
         prefs.edit()
             .remove(KEY_THEME).remove(KEY_CUSTOM_FILL).remove(KEY_CUSTOM_ACCENT).remove(KEY_CORNER)
-            .remove(KEY_FONT).remove(KEY_TEXT_SCALE).remove(KEY_TEXT_MODE).remove(KEY_OPACITY)
+            .remove(KEY_FONT).remove(KEY_TEXT_SIZE).remove(KEY_TEXT_MODE).remove(KEY_OPACITY)
             .remove(KEY_SHOW_LABEL).remove(KEY_SIZE_SCALE)
             .apply()
     }
@@ -82,7 +82,7 @@ class MotivationStore(context: Context) {
         .put("customAccent", customAccent)
         .put("corner", corner)
         .put("font", font)
-        .put("textScale", textScale)
+        .put("textSize", textSize)
         .put("textMode", textMode)
         .put("opacity", opacity)
         .put("showLabel", showLabel)
@@ -96,7 +96,7 @@ class MotivationStore(context: Context) {
         customAccent = obj.optInt("customAccent", customAccent)
         corner = obj.optInt("corner", corner)
         font = obj.optInt("font", font)
-        textScale = obj.optInt("textScale", textScale)
+        textSize = obj.optInt("textSize", textSize)
         textMode = obj.optInt("textMode", textMode)
         opacity = obj.optInt("opacity", opacity)
         showLabel = obj.optBoolean("showLabel", showLabel)
@@ -192,7 +192,7 @@ class MotivationStore(context: Context) {
         private const val KEY_CUSTOM_ACCENT = "style_custom_accent"
         private const val KEY_CORNER = "style_corner"
         private const val KEY_FONT = "style_font"
-        private const val KEY_TEXT_SCALE = "style_text_scale"
+        private const val KEY_TEXT_SIZE = "style_text_size"
         private const val KEY_TEXT_MODE = "style_text_mode"
         private const val KEY_OPACITY = "style_opacity"
         private const val KEY_SHOW_LABEL = "style_show_label"

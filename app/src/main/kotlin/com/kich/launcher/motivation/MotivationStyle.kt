@@ -28,7 +28,10 @@ data class ResolvedStyle(
     val lightText: Boolean,
     val corner: Int,
     val font: Int,
-    val maxSp: Float,
+    /** 0 = Auto (fit to the space), 1 / 2 / 3 = small / medium / large. */
+    val textSize: Int,
+    /** Overall widget size multiplier (0.7 .. 1.5). */
+    val scale: Float,
     val opacity: Int,
     val showLabel: Boolean,
 )
@@ -50,8 +53,15 @@ object MotivationStyle {
     /** Corner radius (dp) for sharp / soft / round. Keep in step with the widget_motivation_fill_* drawables. */
     val CORNER_DP = listOf(12, 28, 44)
 
-    /** Biggest quote text size (sp) for the small / medium / large text setting. */
-    private val MAX_SP = listOf(16f, 22f, 30f)
+    /** Quote text size (sp) for the small / medium / large text setting (before the size slider). */
+    private val TEXT_SP = listOf(14f, 18f, 24f)
+
+    /** Biggest size Auto may pick (sp, before the size slider). */
+    const val AUTO_MAX_SP = 30f
+
+    /** The fixed quote size for [textSize], or null for Auto (0) where the size is fitted to the space. */
+    fun fixedTextSp(textSize: Int): Float? =
+        if (textSize <= 0) null else TEXT_SP[(textSize - 1).coerceIn(0, TEXT_SP.size - 1)]
 
     private const val MIN_SP = 11f
     private const val LINE_FACTOR = 1.4f
@@ -117,7 +127,8 @@ object MotivationStyle {
             lightText = light,
             corner = store.corner,
             font = store.font,
-            maxSp = MAX_SP[store.textScale.coerceIn(0, 2)],
+            textSize = store.textSize,
+            scale = store.sizeScale / 100f,
             opacity = store.opacity,
             showLabel = store.showLabel,
         )

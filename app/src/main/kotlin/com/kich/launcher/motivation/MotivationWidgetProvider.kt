@@ -58,7 +58,7 @@ class MotivationWidgetProvider : AppWidgetProvider() {
         const val ACTION_FAVORITE = "com.kich.launcher.motivation.FAVORITE"
 
         /** Below this height (dp) the one-row layout is used. */
-        private const val COMPACT_BELOW_DP = 100
+        private const val COMPACT_BELOW_DP = 120
 
         private val FILL = intArrayOf(
             R.drawable.widget_motivation_fill_sharp,
@@ -97,7 +97,7 @@ class MotivationWidgetProvider : AppWidgetProvider() {
 
             // The user's size slider scales text, padding and buttons together. Buttons can only be
             // resized on Android 12+ (setViewLayoutWidth); before that they keep their base size.
-            val scale = store.sizeScale / 100f
+            val scale = style.scale
             val baseChip = if (compact) 34f else 40f
             val chipDp = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                 minOf(baseChip * scale, heightDp * (if (compact) 0.7f else 0.35f)).coerceAtLeast(24f)
@@ -119,8 +119,16 @@ class MotivationWidgetProvider : AppWidgetProvider() {
                 textWidth = widthDp - padStart - padEnd - 8f
                 textHeight = heightDp - padTop - padBottom - (if (style.showLabel) 18f else 0f) - chipDp
             }
-            val maxSp = (if (compact) minOf(style.maxSp, 18f) else style.maxSp) * scale
-            val fit = MotivationStyle.fitText(quote, textWidth, textHeight, maxSp, style.font)
+            // Small / Medium / Large are real sizes (times the size slider); Auto fits the space.
+            // A fixed size that is too big for the room is cut with an ellipsis, so the user sees the
+            // setting take effect and can resize the widget or pick a smaller size.
+            val fixedSp = MotivationStyle.fixedTextSp(style.textSize)
+            val fit = if (fixedSp != null) {
+                val sp = fixedSp * scale
+                TextFit(sp, (textHeight / (sp * 1.4f)).toInt().coerceAtLeast(1))
+            } else {
+                MotivationStyle.fitText(quote, textWidth, textHeight, MotivationStyle.AUTO_MAX_SP * scale, style.font)
+            }
 
             val flags = PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
             val views = RemoteViews(

@@ -51,6 +51,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.unit.dp
 import com.kich.launcher.R
 import com.kich.launcher.ui.LauncherAppTheme
@@ -119,6 +120,7 @@ private fun MotivationScreen() {
     ) {
         Text(stringResource(R.string.motivation_title), style = MaterialTheme.typography.headlineMedium)
 
+        val previewSp = (MotivationStyle.fixedTextSp(style.textSize) ?: 20f) * style.scale
         val cardShape = RoundedCornerShape(MotivationStyle.CORNER_DP[style.corner].dp)
         val cardAlpha = style.opacity / 100f
         Box(
@@ -137,6 +139,9 @@ private fun MotivationScreen() {
             Text(
                 quote,
                 style = MaterialTheme.typography.titleLarge,
+                // The card previews the real text size and size slider (Auto shows a medium size).
+                fontSize = previewSp.sp,
+                lineHeight = (previewSp * 1.3f).sp,
                 color = Color(style.text),
                 fontFamily = when (style.font) {
                     MotivationStyle.FONT_MONO -> FontFamily.Monospace
@@ -145,7 +150,7 @@ private fun MotivationScreen() {
                 },
                 fontStyle = if (style.font == MotivationStyle.FONT_SERIF) FontStyle.Italic else FontStyle.Normal,
                 fontWeight = if (style.font == MotivationStyle.FONT_SANS) FontWeight.Medium else null,
-                modifier = Modifier.padding(24.dp),
+                modifier = Modifier.padding((24 * style.scale).dp),
             )
         }
 
@@ -276,12 +281,13 @@ private fun MotivationScreen() {
         Text(stringResource(R.string.motivation_size_title), style = MaterialTheme.typography.bodyLarge)
         OptionRow(
             labels = listOf(
+                stringResource(R.string.motivation_size_auto),
                 stringResource(R.string.motivation_size_small),
                 stringResource(R.string.motivation_size_medium),
                 stringResource(R.string.motivation_size_large),
             ),
-            selected = remember(version) { store.textScale },
-            onSelect = { store.textScale = it; changed() },
+            selected = style.textSize,
+            onSelect = { store.textSize = it; changed() },
         )
 
         Text(stringResource(R.string.motivation_textcolor_title), style = MaterialTheme.typography.bodyLarge)
