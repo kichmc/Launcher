@@ -59,6 +59,11 @@ class MotivationStore(context: Context) {
         get() = prefs.getInt(KEY_OPACITY, 95).coerceIn(30, 100)
         set(value) = prefs.edit().putInt(KEY_OPACITY, value.coerceIn(30, 100)).apply()
 
+    /** Overall widget size in percent (70..150): quote text, padding and buttons scale together. */
+    var sizeScale: Int
+        get() = prefs.getInt(KEY_SIZE_SCALE, 100).coerceIn(70, 150)
+        set(value) = prefs.edit().putInt(KEY_SIZE_SCALE, value.coerceIn(70, 150)).apply()
+
     var showLabel: Boolean
         get() = prefs.getBoolean(KEY_SHOW_LABEL, true)
         set(value) = prefs.edit().putBoolean(KEY_SHOW_LABEL, value).apply()
@@ -67,7 +72,7 @@ class MotivationStore(context: Context) {
         prefs.edit()
             .remove(KEY_THEME).remove(KEY_CUSTOM_FILL).remove(KEY_CUSTOM_ACCENT).remove(KEY_CORNER)
             .remove(KEY_FONT).remove(KEY_TEXT_SCALE).remove(KEY_TEXT_MODE).remove(KEY_OPACITY)
-            .remove(KEY_SHOW_LABEL)
+            .remove(KEY_SHOW_LABEL).remove(KEY_SIZE_SCALE)
             .apply()
     }
 
@@ -81,6 +86,7 @@ class MotivationStore(context: Context) {
         .put("textMode", textMode)
         .put("opacity", opacity)
         .put("showLabel", showLabel)
+        .put("sizeScale", sizeScale)
 
     /** Old backups have no "style" block; every value falls back to what is set now. */
     private fun applyStyleJson(obj: org.json.JSONObject) {
@@ -94,6 +100,7 @@ class MotivationStore(context: Context) {
         textMode = obj.optInt("textMode", textMode)
         opacity = obj.optInt("opacity", opacity)
         showLabel = obj.optBoolean("showLabel", showLabel)
+        sizeScale = obj.optInt("sizeScale", sizeScale)
     }
 
     /** Bumped by "new quote"; shifts the shown quote by one position. */
@@ -189,6 +196,7 @@ class MotivationStore(context: Context) {
         private const val KEY_TEXT_MODE = "style_text_mode"
         private const val KEY_OPACITY = "style_opacity"
         private const val KEY_SHOW_LABEL = "style_show_label"
+        private const val KEY_SIZE_SCALE = "style_size_scale"
         const val MAX_LENGTH = 200
 
         /** Intervals offered in settings; the system updates widgets at most every 30 minutes. */

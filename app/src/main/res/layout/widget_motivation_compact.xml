@@ -21,6 +21,7 @@
         android:src="@drawable/widget_motivation_glow_soft" />
 
     <LinearLayout
+        android:id="@+id/content"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
         android:gravity="center_vertical"

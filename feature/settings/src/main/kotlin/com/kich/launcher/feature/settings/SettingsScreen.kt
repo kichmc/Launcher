@@ -91,6 +91,7 @@ import com.kich.launcher.model.drawerSurface
 import com.kich.launcher.ui.DefaultLauncher
 import com.kich.launcher.ui.LauncherIcons
 import com.kich.launcher.ui.LongPressScale
+import com.kich.launcher.ui.declaresPermission
 import com.kich.launcher.ui.component.AppIcon
 import com.kich.launcher.ui.component.LocalIconPack
 import com.kich.launcher.ui.component.LocalThemeAllIcons
@@ -384,17 +385,20 @@ fun SettingsScreen(
                         s.hideSystemStatusBar,
                         viewModel::setHideSystemStatusBar,
                     )
-                    WeatherToggle(enabled = s.showWeather, onSetEnabled = viewModel::setShowWeather)
-                    if (s.showWeather) {
-                        WeatherAppRow(appLabel = allApps.firstOrNull { it.key == s.weatherAppKey }?.label) {
-                            showWeatherAppPicker = true
+                    // Weather needs the location permission; without it in the manifest there is no weather.
+                    if (context.declaresPermission(android.Manifest.permission.ACCESS_COARSE_LOCATION)) {
+                        WeatherToggle(enabled = s.showWeather, onSetEnabled = viewModel::setShowWeather)
+                        if (s.showWeather) {
+                            WeatherAppRow(appLabel = allApps.firstOrNull { it.key == s.weatherAppKey }?.label) {
+                                showWeatherAppPicker = true
+                            }
+                            SwitchRow(
+                                stringResource(R.string.settings_network_place_names),
+                                stringResource(R.string.settings_network_place_names_desc),
+                                s.networkPlaceNames,
+                                viewModel::setNetworkPlaceNames,
+                            )
                         }
-                        SwitchRow(
-                            stringResource(R.string.settings_network_place_names),
-                            stringResource(R.string.settings_network_place_names_desc),
-                            s.networkPlaceNames,
-                            viewModel::setNetworkPlaceNames,
-                        )
                     }
                     ExpressiveActionRow(
                         label = stringResource(R.string.settings_notif_widget_count),
@@ -519,18 +523,18 @@ fun SettingsScreen(
                     )
                 }
 
-                CollapsibleSection(
-                    title = stringResource(R.string.settings_search),
-                    collapsed = "search" in s.collapsedSettingsSections,
-                    onToggle = { viewModel.setSectionCollapsed("search", it) },
-                ) {
-                    ContactsSearchToggle(
-                        enabled = s.searchContacts,
-                        onSetEnabled = viewModel::setSearchContacts,
-                    )
-
-                    // Every permission the launcher uses, with a live granted/not-granted status
-                    // (the notif-access row moved here from the Notifications section).
+                // The Search section holds only the contacts toggle, which needs READ_CONTACTS.
+                if (context.declaresPermission(android.Manifest.permission.READ_CONTACTS)) {
+                    CollapsibleSection(
+                        title = stringResource(R.string.settings_search),
+                        collapsed = "search" in s.collapsedSettingsSections,
+                        onToggle = { viewModel.setSectionCollapsed("search", it) },
+                    ) {
+                        ContactsSearchToggle(
+                            enabled = s.searchContacts,
+                            onSetEnabled = viewModel::setSearchContacts,
+                        )
+                    }
                 }
 
                 CollapsibleSection(
@@ -550,22 +554,16 @@ fun SettingsScreen(
                     ) {
                         openNotificationAccess(context)
                     }
-                    PermissionRow(
-                        label = stringResource(R.string.settings_permission_calendar),
-                        permission = android.Manifest.permission.READ_CALENDAR,
-                    )
-                    PermissionRow(
-                        label = stringResource(R.string.settings_permission_contacts),
-                        permission = android.Manifest.permission.READ_CONTACTS,
-                    )
-                    PermissionRow(
-                        label = stringResource(R.string.settings_permission_phone),
-                        permission = android.Manifest.permission.READ_PHONE_STATE,
-                    )
-                    PermissionRow(
-                        label = stringResource(R.string.settings_permission_location),
-                        permission = android.Manifest.permission.ACCESS_COARSE_LOCATION,
-                    )
+                    // Only permissions the manifest declares: an undeclared one can never be granted.
+                    listOf(
+                        R.string.settings_permission_calendar to android.Manifest.permission.READ_CALENDAR,
+                        R.string.settings_permission_contacts to android.Manifest.permission.READ_CONTACTS,
+                        R.string.settings_permission_phone to android.Manifest.permission.READ_PHONE_STATE,
+                        R.string.settings_permission_location to android.Manifest.permission.ACCESS_COARSE_LOCATION,
+                    ).filter { (_, permission) -> context.declaresPermission(permission) }
+                        .forEach { (label, permission) ->
+                            PermissionRow(label = stringResource(label), permission = permission)
+                        }
                 }
 
                 CollapsibleSection(
@@ -1114,6 +1112,7 @@ private fun StatusBarToggle(enabled: Boolean, onSetEnabled: (Boolean) -> Unit) {
     SwitchRow(stringResource(R.string.settings_status_bar), enabled) { wantOn ->
         onSetEnabled(wantOn)
         if (wantOn &&
+            context.declaresPermission(android.Manifest.permission.READ_PHONE_STATE) &&
             ContextCompat.checkSelfPermission(context, android.Manifest.permission.READ_PHONE_STATE) !=
             PackageManager.PERMISSION_GRANTED
         ) {

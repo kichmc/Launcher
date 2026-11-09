@@ -64,6 +64,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import com.kich.launcher.ui.CoverSystemBars
 import com.kich.launcher.ui.DefaultLauncher
+import com.kich.launcher.ui.declaresPermission
 import com.kich.launcher.ui.LauncherIcons
 
 /** The Arkikeskus brand colors the aurora blobs drift in (fixed — independent of the theme). */
@@ -310,6 +311,11 @@ private fun granted(context: Context, permission: String): Boolean =
 @Composable
 private fun PermissionsPage(onContactsGranted: () -> Unit, onPhoneGranted: () -> Unit) {
     val context = LocalContext.current
+    // Only ask for what the manifest declares: an undeclared permission can never be granted.
+    val calendarDeclared = remember { context.declaresPermission(Manifest.permission.READ_CALENDAR) }
+    val contactsDeclared = remember { context.declaresPermission(Manifest.permission.READ_CONTACTS) }
+    val phoneDeclared = remember { context.declaresPermission(Manifest.permission.READ_PHONE_STATE) }
+    val locationDeclared = remember { context.declaresPermission(Manifest.permission.ACCESS_COARSE_LOCATION) }
     var notifAccess by remember { mutableStateOf(hasNotificationAccess(context)) }
     var calendar by remember { mutableStateOf(granted(context, Manifest.permission.READ_CALENDAR)) }
     var contacts by remember { mutableStateOf(granted(context, Manifest.permission.READ_CONTACTS)) }
@@ -373,42 +379,58 @@ private fun PermissionsPage(onContactsGranted: () -> Unit, onPhoneGranted: () ->
             granted = notifAccess,
             onClick = { openNotificationAccessSettings() },
         )
-        PermissionRow(
-            title = stringResource(R.string.onboarding_perm_calendar),
-            description = stringResource(R.string.onboarding_perm_calendar_desc),
-            granted = calendar,
-            onClick = { permissionsLauncher.launch(arrayOf(Manifest.permission.READ_CALENDAR)) },
-        )
-        PermissionRow(
-            title = stringResource(R.string.onboarding_perm_contacts),
-            description = stringResource(R.string.onboarding_perm_contacts_desc),
-            granted = contacts,
-            onClick = { permissionsLauncher.launch(arrayOf(Manifest.permission.READ_CONTACTS)) },
-        )
-        PermissionRow(
-            title = stringResource(R.string.onboarding_perm_phone),
-            description = stringResource(R.string.onboarding_perm_phone_desc),
-            granted = phone,
-            onClick = { permissionsLauncher.launch(arrayOf(Manifest.permission.READ_PHONE_STATE)) },
-        )
-        PermissionRow(
-            title = stringResource(R.string.onboarding_perm_location),
-            description = stringResource(R.string.onboarding_perm_location_desc),
-            granted = location,
-            onClick = { permissionsLauncher.launch(arrayOf(Manifest.permission.ACCESS_COARSE_LOCATION)) },
-        )
+        if (calendarDeclared) {
+            PermissionRow(
+                title = stringResource(R.string.onboarding_perm_calendar),
+                description = stringResource(R.string.onboarding_perm_calendar_desc),
+                granted = calendar,
+                onClick = { permissionsLauncher.launch(arrayOf(Manifest.permission.READ_CALENDAR)) },
+            )
+        }
+        if (contactsDeclared) {
+            PermissionRow(
+                title = stringResource(R.string.onboarding_perm_contacts),
+                description = stringResource(R.string.onboarding_perm_contacts_desc),
+                granted = contacts,
+                onClick = { permissionsLauncher.launch(arrayOf(Manifest.permission.READ_CONTACTS)) },
+            )
+        }
+        if (phoneDeclared) {
+            PermissionRow(
+                title = stringResource(R.string.onboarding_perm_phone),
+                description = stringResource(R.string.onboarding_perm_phone_desc),
+                granted = phone,
+                onClick = { permissionsLauncher.launch(arrayOf(Manifest.permission.READ_PHONE_STATE)) },
+            )
+        }
+        if (locationDeclared) {
+            PermissionRow(
+                title = stringResource(R.string.onboarding_perm_location),
+                description = stringResource(R.string.onboarding_perm_location_desc),
+                granted = location,
+                onClick = { permissionsLauncher.launch(arrayOf(Manifest.permission.ACCESS_COARSE_LOCATION)) },
+            )
+        }
         Spacer(Modifier.height(20.dp))
-        if (!(calendar && contacts && phone && location && notifAccess)) {
+        val anyMissing = (calendarDeclared && !calendar) || (contactsDeclared && !contacts) ||
+            (phoneDeclared && !phone) || (locationDeclared && !location) || !notifAccess
+        if (anyMissing) {
             Button(
                 onClick = {
                     openNotifAfterChain = true
-                    val perms = arrayOf(
-                        Manifest.permission.READ_CALENDAR,
-                        Manifest.permission.READ_CONTACTS,
-                        Manifest.permission.READ_PHONE_STATE,
-                        Manifest.permission.ACCESS_COARSE_LOCATION,
-                    )
-                    permissionsLauncher.launch(perms)
+                    val perms = buildList {
+                        if (calendarDeclared) add(Manifest.permission.READ_CALENDAR)
+                        if (contactsDeclared) add(Manifest.permission.READ_CONTACTS)
+                        if (phoneDeclared) add(Manifest.permission.READ_PHONE_STATE)
+                        if (locationDeclared) add(Manifest.permission.ACCESS_COARSE_LOCATION)
+                    }.toTypedArray()
+                    if (perms.isEmpty()) {
+                        // Nothing to ask in a dialog: go straight to notification access.
+                        openNotifAfterChain = false
+                        if (!hasNotificationAccess(context)) openNotificationAccessSettings()
+                    } else {
+                        permissionsLauncher.launch(perms)
+                    }
                 },
                 colors = ButtonDefaults.buttonColors(containerColor = AURORA_BLUE),
             ) {

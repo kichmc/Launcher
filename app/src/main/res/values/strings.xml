@@ -57,6 +57,7 @@
     <string name="motivation_theme_custom">Custom</string>
     <string name="motivation_custom_fill_hint">Background colour (#RRGGBB)</string>
     <string name="motivation_custom_accent_hint">Accent colour (#RRGGBB)</string>
+    <string name="motivation_size_scale_title">Widget size: %1$d%%</string>
     <string name="motivation_corner_title">Corners</string>
     <string name="motivation_corner_sharp">Sharp</string>
     <string name="motivation_corner_soft">Soft</string>

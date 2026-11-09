@@ -104,6 +104,7 @@ private fun MotivationScreen() {
         themeIds.associateWith { MotivationStyle.colorsFor(context, it, store.customFill, store.customAccent) }
     }
     var opacityDraft by remember(version) { mutableStateOf(store.opacity.toFloat()) }
+    var sizeDraft by remember(version) { mutableStateOf(store.sizeScale.toFloat()) }
     var fillHex by remember { mutableStateOf(MotivationStyle.toHex(store.customFill)) }
     var accentHex by remember { mutableStateOf(MotivationStyle.toHex(store.customAccent)) }
 
@@ -238,6 +239,17 @@ private fun MotivationScreen() {
                 modifier = Modifier.fillMaxWidth(),
             )
         }
+
+        Text(
+            stringResource(R.string.motivation_size_scale_title, sizeDraft.toInt()),
+            style = MaterialTheme.typography.bodyLarge,
+        )
+        Slider(
+            value = sizeDraft,
+            onValueChange = { sizeDraft = it },
+            onValueChangeFinished = { store.sizeScale = sizeDraft.toInt(); changed() },
+            valueRange = 70f..150f,
+        )
 
         Text(stringResource(R.string.motivation_corner_title), style = MaterialTheme.typography.bodyLarge)
         OptionRow(

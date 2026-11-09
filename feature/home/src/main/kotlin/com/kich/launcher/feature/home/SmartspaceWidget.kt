@@ -81,6 +81,7 @@ import com.kich.launcher.model.AppItem
 import kotlin.math.roundToInt
 import java.util.Date
 import javax.inject.Inject
+import com.kich.launcher.ui.declaresPermission
 import com.kich.launcher.ui.themedTextStyle
 
 @HiltViewModel
@@ -180,11 +181,17 @@ fun SmartspaceWidget(
     modifier: Modifier = Modifier,
     viewModel: SmartspaceViewModel = hiltViewModel(),
 ) {
+    // A permission the manifest no longer declares can never be granted, so its tap-to-allow line
+    // must not show: no calendar declaration = no calendar prompt, no location declaration = no
+    // weather (it needs the location) and no location prompt.
+    val context = LocalContext.current
+    val calendarDeclared = remember { context.declaresPermission(Manifest.permission.READ_CALENDAR) }
+    val locationDeclared = remember { context.declaresPermission(Manifest.permission.ACCESS_COARSE_LOCATION) }
     val state = SmartspaceState(
-        hasCalendarPermission = viewModel.hasCalendarPermission.collectAsStateWithLifecycle().value,
+        hasCalendarPermission = viewModel.hasCalendarPermission.collectAsStateWithLifecycle().value || !calendarDeclared,
         nextEvent = viewModel.nextEvent.collectAsStateWithLifecycle().value,
         hasLocationPermission = viewModel.hasLocationPermission.collectAsStateWithLifecycle().value,
-        showWeather = viewModel.showWeather.collectAsStateWithLifecycle().value,
+        showWeather = viewModel.showWeather.collectAsStateWithLifecycle().value && locationDeclared,
         weather = viewModel.weather.collectAsStateWithLifecycle().value,
         weatherApp = viewModel.weatherApp.collectAsStateWithLifecycle().value,
     )

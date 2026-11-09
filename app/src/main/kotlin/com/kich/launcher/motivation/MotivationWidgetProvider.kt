@@ -7,6 +7,7 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.res.Configuration
+import android.os.Build
 import android.os.Bundle
 import android.util.TypedValue
 import android.view.View
@@ -94,17 +95,32 @@ class MotivationWidgetProvider : AppWidgetProvider() {
             val compact = heightDp < COMPACT_BELOW_DP
             val showRefresh = !compact || widthDp >= 200
 
+            // The user's size slider scales text, padding and buttons together. Buttons can only be
+            // resized on Android 12+ (setViewLayoutWidth); before that they keep their base size.
+            val scale = store.sizeScale / 100f
+            val baseChip = if (compact) 34f else 40f
+            val chipDp = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                minOf(baseChip * scale, heightDp * (if (compact) 0.7f else 0.35f)).coerceAtLeast(24f)
+            } else {
+                baseChip
+            }
+            val padStart = (if (compact) 16f else 20f) * scale
+            val padTop = (if (compact) 8f else 14f) * scale
+            val padEnd = (if (compact) 8f else 12f) * scale
+            val padBottom = (if (compact) 8f else 10f) * scale
+
             // Room left for the quote after padding, header and buttons (all in dp).
             val textWidth: Float
             val textHeight: Float
             if (compact) {
-                textWidth = widthDp - 24f - 40f - (if (showRefresh) 40f else 0f)
-                textHeight = heightDp - 16f
+                textWidth = widthDp - padStart - padEnd - 6f - chipDp - (if (showRefresh) chipDp + 6f else 0f)
+                textHeight = heightDp - padTop - padBottom
             } else {
-                textWidth = widthDp - 32f - 8f
-                textHeight = heightDp - 24f - (if (style.showLabel) 18f else 0f) - 40f
+                textWidth = widthDp - padStart - padEnd - 8f
+                textHeight = heightDp - padTop - padBottom - (if (style.showLabel) 18f else 0f) - chipDp
             }
-            val fit = MotivationStyle.fitText(quote, textWidth, textHeight, if (compact) minOf(style.maxSp, 18f) else style.maxSp, style.font)
+            val maxSp = (if (compact) minOf(style.maxSp, 18f) else style.maxSp) * scale
+            val fit = MotivationStyle.fitText(quote, textWidth, textHeight, maxSp, style.font)
 
             val flags = PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
             val views = RemoteViews(
@@ -133,6 +149,21 @@ class MotivationWidgetProvider : AppWidgetProvider() {
                     views.setInt(id, "setMaxLines", fit.maxLines)
                 }
                 views.setOnClickPendingIntent(id, openSettings)
+            }
+
+            // Spacing and buttons follow the size slider.
+            val density = context.resources.displayMetrics.density
+            views.setViewPadding(
+                R.id.content,
+                (padStart * density).toInt(), (padTop * density).toInt(),
+                (padEnd * density).toInt(), (padBottom * density).toInt(),
+            )
+            intArrayOf(R.id.favorite_button, R.id.refresh_button).forEach { id ->
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                    views.setViewLayoutWidth(id, chipDp, TypedValue.COMPLEX_UNIT_DIP)
+                    views.setViewLayoutHeight(id, chipDp, TypedValue.COMPLEX_UNIT_DIP)
+                }
+                views.setTextViewTextSize(id, TypedValue.COMPLEX_UNIT_SP, chipDp * 0.5f)
             }
 
             // Buttons
