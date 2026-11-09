@@ -1,183 +1,183 @@
-# ARK-launcher
+# AK Launcher
 
-[![Latest release](https://img.shields.io/github/v/release/jrs8205/ARK-launcher?sort=semver)](https://github.com/jrs8205/ARK-launcher/releases/latest)
-[![F-Droid](https://img.shields.io/f-droid/v/com.kich.launcher)](https://f-droid.org/packages/com.kich.launcher/)
-[![Aptoide](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fws75.aptoide.com%2Fapi%2F7%2Fapp%2FgetMeta%3Fpackage_name%3Dcom.kich.launcher&query=%24.data.file.vername&label=Aptoide&prefix=v)](https://ark-launcher.en.aptoide.com/app)
-[![APKPure](https://img.shields.io/badge/APKPure-available-blue)](https://apkpure.com/p/com.kich.launcher)
-[![SourceForge](https://img.shields.io/badge/SourceForge-mirror-blue)](https://sourceforge.net/projects/ark-launcher/)
-[![License: Apache-2.0](https://img.shields.io/github/license/jrs8205/ARK-launcher)](LICENSE)
-[![Downloads](https://img.shields.io/github/downloads/jrs8205/ARK-launcher/total)](https://github.com/jrs8205/ARK-launcher/releases)
-[![Built with Jetpack Compose](https://img.shields.io/badge/Built%20with-Jetpack%20Compose-4285F4)](https://developer.android.com/jetpack/compose)
+A lightweight Android home-screen launcher built with **Jetpack Compose**, with a customisable
+**Motivation widget** that shows a rotating quote on your home screen.
 
-A modern, lightweight Android home-screen launcher built entirely with **Jetpack Compose**.
-It speaks **English, Finnish, German, Spanish, French, Polish, Portuguese, Russian, Swedish and Turkish**
-(English is the fallback) and shares the visual identity of the
-**Arkikeskus** app, but works as a standalone launcher for anyone.
+AK Launcher is open source under the **Apache License 2.0**.
 
-> Status: early but daily-driven. Built from scratch on a current Kotlin/Compose stack.
+> **Source launcher:** AK Launcher is based on
+> [**ARK-launcher**](https://github.com/jrs8205/ARK-launcher) by **jrs8205**
+> (Apache-2.0). The launcher core (home screen, dock, app drawer, widget hosting, settings,
+> backup) comes from that project. All credit for it goes to its author. See
+> [Credits](#credits) below.
 
-📖 **New here?** The **[Wiki](https://github.com/jrs8205/ARK-launcher/wiki)** has the full user guide —
-[setup](https://github.com/jrs8205/ARK-launcher/wiki/Getting-Started),
-[features](https://github.com/jrs8205/ARK-launcher/wiki/Features),
-[icon packs](https://github.com/jrs8205/ARK-launcher/wiki/Icon-Packs),
-[backup](https://github.com/jrs8205/ARK-launcher/wiki/Backup-and-Restore) and a
-[FAQ](https://github.com/jrs8205/ARK-launcher/wiki/FAQ).
+> **Made with Claude:** the Motivation widget styling, responsive layout, customisation settings,
+> the permission clean-up and the launcher icon described below were written by
+> [**Claude**](https://www.anthropic.com/claude), an AI assistant made by Anthropic, working with
+> the project owner. Claude could not compile or run the code on a device, so those parts need
+> testing. See [Status](#status).
 
-## Screenshots
+## What is different from ARK-launcher
 
-<p align="center">
-  <img src="docs/screenshots/home.png" width="24%" alt="Home screen with a widget" />
-  <img src="docs/screenshots/drawer.png" width="24%" alt="App drawer with search" />
-  <img src="docs/screenshots/widgets.png" width="24%" alt="Widget picker with search" />
-  <img src="docs/screenshots/settings.png" width="24%" alt="Settings" />
-</p>
+### Motivation widget
 
-## Download
+A home-screen widget (a real Android AppWidget, shown in the launcher's widget picker) with a
+quote that rotates on an interval you choose. Tap the quote to open its settings; use the
+buttons on the widget to favourite the quote or get a new one.
 
-Download the latest signed APK from the
-[**Releases**](https://github.com/jrs8205/ARK-launcher/releases/latest) page and open it on
-your device to install. To update, install the newer APK from the same page (Settings ▸ Updates ▸
-"Check for updates" opens it), or let Obtainium do it for you (below). Every release is also
-mirrored on [**SourceForge**](https://sourceforge.net/projects/ark-launcher/).
+Customise it in the Motivation settings screen (the preview card updates live):
 
-ARK-launcher is also on [**F-Droid**](https://f-droid.org/packages/com.kich.launcher/).
-F-Droid builds it from source and ships the same signed APK as GitHub, so you can switch between
-them without reinstalling. New versions reach F-Droid a few days after GitHub.
+| Setting | Options |
+|---|---|
+| Theme | Midnight, Sunset, Forest, Ocean, Paper (light), Black, System (Material You, Android 12+), Custom (your own `#RRGGBB` background and accent) |
+| Corners | Sharp, Soft, Round |
+| Font | Serif, Sans, Mono |
+| Text size | Auto (fits the space), Small, Medium, Large |
+| Text colour | Auto (by background brightness), Light, Dark |
+| Widget size | Slider, 70% to 150%: scales text, padding and buttons |
+| Background opacity | Slider, 30% to 100% |
+| Title label | On or off |
 
-Requires **Android 11 (API 30)** or newer.
+- **Responsive:** each widget is drawn for its own size. About one row tall (under 120 dp) uses a
+  compact layout with the quote and two small buttons side by side; anything taller uses the
+  normal layout. In **Auto** text mode the quote size is fitted to the space. It is redrawn when
+  you resize the widget.
+- **Fixed sizes are real sizes.** If a quote is too long for the space at Medium or Large it is
+  cut with an ellipsis. Make the widget taller or pick Small or Auto.
+- Your style is included in the quotes backup, and old backups without a style still import.
+- The *System* theme follows Android 12+ dynamic colours and updates on the widget's next
+  refresh, not instantly when the system theme changes.
+- Buttons resize with the size slider on Android 12+ only; on Android 11 they keep their base size.
 
-**Registered with Google.** The package name and signing key are registered in Google's Android
-Developer Console, so the app keeps installing as usual under Google's new [sideloading
-rules](https://developer.android.com/developer-verification).
+### Permission screens follow the manifest
 
-### Auto-updates with Obtainium
+A permission that is not declared in `AndroidManifest.xml` can never be granted, because Android
+shows no dialog for it. ARK-launcher's screens could still ask for such permissions, so the UI now
+checks the manifest through one helper (`declaresPermission()` in `core/ui`):
 
-Prefer an app-store-style experience with automatic updates? Install
-[**Obtainium**](https://github.com/ImranR98/Obtainium) and add this repository as an app source:
+- no `<uses-permission>` line means no prompt, toggle or settings row for it;
+- Smartspace widget: no location permission means no weather and no "Tap to allow location" line;
+  no calendar permission means no calendar prompt;
+- onboarding and the settings Permissions list only show declared permissions, and "Grant all"
+  only asks for those;
+- the weather settings and the contacts-search section are hidden when their permission is
+  not declared.
 
-```
-https://github.com/jrs8205/ARK-launcher
-```
+In this snapshot the manifest declares only `READ_CALENDAR` of the runtime permissions, so
+weather, contacts search and the mobile-signal icon are unavailable. To bring a feature back,
+add its `<uses-permission>` line again and its UI returns by itself.
 
-Obtainium watches the Releases page and updates the launcher for you.
+### New launcher icon
 
-## Feedback & questions
+The icon is an **AK monogram** on a navy-to-purple background with a warm glow, matching the
+Midnight widget theme. It is an adaptive icon with a monochrome layer, so it follows the
+Android 13+ themed-icon setting. `tools/make_icon.py` (Python and Pillow) generates the PNGs, so
+you can change the colours or the shape and regenerate them. Claude designed and generated it. It
+has only been checked as a render under circle, rounded and square masks, not on a device.
 
-Questions, ideas, and general chat are all welcome in
-[**GitHub Discussions**](https://github.com/jrs8205/ARK-launcher/discussions) or the
-[**r/ArkLauncher**](https://www.reddit.com/r/ArkLauncher/) community — in English or Finnish; release
-news goes out on the [**Telegram channel**](https://t.me/ARKLauncherUpdates).
-Found a bug? Please [open an issue](https://github.com/jrs8205/ARK-launcher/issues) instead.
-Discussions, the channel and Reddit are also linked in the app: **Settings ▸ Feedback**.
+### Languages
 
-## Features
+The launcher keeps ARK-launcher's translations (English, Finnish, German, Spanish, French,
+Polish, Portuguese, Russian, Swedish and Turkish). The Motivation widget screens and the
+text added in this project are **English only** for now and fall back to English in other
+languages. Translations are welcome: add the strings to the matching `values-<lang>/strings.xml`.
 
-- **Paged home screen** with free icon placement and smooth drag-and-drop — move icons within a
-  page, across pages, and between the home grid and the dock. Drag an app from the drawer straight
-  onto any page.
-- **Dock** of favorite apps and folders (reorder, drag in/out; drop an app onto a dock app to make a folder).
-- **Swipe up from the dock** to open the app drawer, as from anywhere on the home screen.
-- **App drawer with universal search** — one search box finds:
-  - installed **apps**,
-  - common **system settings** pages (type "wifi", "battery", …),
-  - **contacts** (opt-in; gated by a setting + the `READ_CONTACTS` permission),
-  - a **calculator / unit converter** (type `12*7` or `100 cm to in`).
-  - plus an optional **most-used apps** row.
-- **Home-screen widgets** — browse large previews, tap Add or drag a preview onto the home screen.
-  Long-press and continue dragging to move a widget; hold at a screen edge to change pages.
-  Resize handles show the footprint and respect the widget's size limits; compatible widgets can
-  stretch to full width or be reconfigured. Collection widgets (e.g. chat lists) scroll in place.
-  Built-in clock (with the next event, alarm and optional weather), battery and notification
-  widgets adapt to their size and offer translucent or themed backgrounds in Home screen settings.
-- **Folders** on the home screen and inside the drawer: a tap opens a folder to look, a pencil opens its editor.
-- **Notification dots / badges** (via a notification-listener service; dot or Nova-style count).
-- **People widget**: messages, missed calls and mail grouped by person as tiles, with optional
-  batch delivery that holds others' messages in the launcher's widgets, badges and status bar until
-  set times. Android notifications, sounds and pop-ups remain active; new messages from pinned
-  people, missed calls and recognized one-time codes bypass the batch.
-- **Page menu**: add a page to the left or right, set the home page, remove an empty page.
-- **Material You themed icons** (monochrome, on supported Android versions), optionally for
-  **every app** (apps without a themed icon get a silhouette of their own), and third-party
-  **[icon packs](https://github.com/jrs8205/ARK-launcher/wiki/Icon-Packs)**.
-- Optional **themed status bar** with the clock, status indicators and notification icons.
-- **Configurable gestures:** swipe up → app drawer, swipe down → notifications, a configurable
-  **left-edge swipe** that launches an app of your choice, an opt-in **swipe up on a home folder**
-  that opens the folder's first app, and a per-icon **"Swipe up opens"** choice (Edit) that opens
-  another app from a home or dock icon.
-- **Customizable look** — a **font** for everything the launcher draws (six families Android ships),
-  adjustable app-label **text size** and **colour**, **one- or two-line
-  labels** (per surface), icon size for home and dock and separately for the app drawer, dock and
-  drawer opacity, an **app drawer background colour** or none at all (the text turns black or white to match, or takes a
-  **label colour** of your own), a
-  **picture of your own behind the app drawer** with a dim for legibility (the colour is off while it is set), an
-  optional **wallpaper blur** behind the rising app drawer (Android 12+, with a
-  strength slider; the home screen fades out under a see-through drawer so only the wallpaper shows), widget
-  edges aligned with the icons, hiding home-screen apps from the drawer, grid columns, **folder
-  columns**, page indicator, and more. App drawer folders can lead the list or sit among the apps
-  A–Z, and every settings section folds under its title.
-- **Backup & restore** — export/import your layout and settings to a file (widgets included).
-- **Double-tap to lock** — double-tap empty home-screen space to lock the screen (opt-in; uses a
-  minimal accessibility service that reads nothing).
-- **Lock desktop** — a toggle that prevents accidental moving, removing, or adding of items.
-- **Pixel-style long-press menus** with app shortcuts and actions, plus an **empty-area menu**
-  (home settings / wallpaper), all in one consistent visual style.
-- Hide apps from the drawer, rename apps with custom labels, and a self-contained settings screen.
+## Features inherited from ARK-launcher
 
-## Tech stack
+Paged home screen with drag and drop, dock, folders, app drawer with universal search (apps,
+settings, optional contacts, calculator and unit converter), home-screen widgets with resize and
+reconfigure, notification dots, themed icons and icon packs, configurable gestures, backup and
+restore, double-tap to lock, lock desktop, and many appearance options. The full feature list
+lives in the
+[ARK-launcher README](https://github.com/jrs8205/ARK-launcher#features), and its
+[wiki](https://github.com/jrs8205/ARK-launcher/wiki) has a user guide. Both describe
+ARK-launcher, so where they differ from this project (the Motivation widget, the permissions
+below), this README is the one that applies.
 
-- **Kotlin** + **Jetpack Compose** (Material 3), single-Activity.
-- **Hilt** (DI), **Room** (layout persistence), **DataStore** (preferences), **Coil** (icons),
-  **AppWidgetHost** (widgets).
-- Multi-module architecture with `build-logic` convention plugins.
-- JDK 21, AGP 9, Gradle 9.
+## Permissions
+
+What this snapshot declares in its merged manifest:
+
+- **Runtime (asks you):** `READ_CALENDAR` only, for the next event in the clock widget.
+- **No prompt:** `SET_WALLPAPER`, `EXPAND_STATUS_BAR`, `ACCESS_NETWORK_STATE`,
+  `ACCESS_WIFI_STATE`, `BLUETOOTH` (Android 11 only), `QUERY_ALL_PACKAGES`,
+  `REQUEST_DELETE_PACKAGES`, `HIDE_OVERLAY_WINDOWS` and `INTERNET`.
+- `INTERNET` is declared in `core/data` and used only by the weather code. Weather needs the
+  location permission, which is not declared here, and the weather code returns before any request
+  without it, so the launcher makes no network requests at the moment. If you want a launcher
+  with no network access at all, remove that `<uses-permission>` line.
+- The Motivation widget needs no permission. Quotes and style settings are stored on the device.
+
+## Requirements
+
+- Android 11 (API 30) or newer
+- To build: JDK 21 and the Android SDK (Android Studio's bundled JDK works)
 
 ## Build
 
-You need **JDK 21** (the Android Studio JBR works well) and the Android SDK.
-
 ```bash
-# Point the build at your SDK (or set sdk.dir in local.properties)
 ./gradlew :app:assembleDebug
-```
-
-Install on a connected device:
-
-```bash
 adb install -r app/build/outputs/apk/debug/app-debug.apk
 ```
 
-Set it as the default launcher from Android's Settings ▸ Apps ▸ Default apps ▸ Home app, or accept
-the prompt the app shows.
+The debug build installs as `com.kich.launcher.debug`. Then set it as your home app in
+Settings > Apps > Default apps > Home app.
 
-Requirements: `minSdk 30`.
+No computer? See [BUILD_ON_PHONE.md](BUILD_ON_PHONE.md) to build with GitHub Actions from a phone.
+
+### Release signing
+
+**Never commit a keystore (`.p12`, `.jks`, `.keystore`) or its password to this repository.**
+Anyone with them can sign apps as you. Keep them outside the repo and give the release workflow
+the values through your CI's secret store. If a keystore was ever committed or published, treat it
+as compromised and create a new one.
 
 ## Project layout
 
-- `app` — the single Activity, manifest HOME intent filter, DI entry point, the AppWidgetHost.
-- `core/*` — `model`, `data` (Room/DataStore/repositories + search providers + backup),
-  `ui` (shared Compose components, popups, the expressive theme), `designsystem`, `launcher`.
-- `feature/*` — `home` (workspace + dock + widgets), `appdrawer`, `settings`, `backup`.
+- `app`: the single Activity, manifest, dependency injection, the AppWidgetHost, and the
+  Motivation widget (`app/.../motivation`)
+- `core/*`: `model`, `data`, `ui` (shared Compose components), `designsystem`, `launcher`
+- `feature/*`: `home` (workspace, dock, widgets), `appdrawer`, `settings`, `backup`
+- `build-logic`: Gradle convention plugins
 
-## Support development
+Files for the Motivation widget:
 
-If ARK-launcher is useful to you, you can support its development:
+- `MotivationWidgetProvider.kt`: draws the widget (responsive layout and text fitting)
+- `MotivationStyle.kt`: themes, colour resolving, text-fit estimate
+- `MotivationStore.kt`: quotes, favourites and style settings (SharedPreferences), backup
+- `MotivationActivity.kt`: the settings screen (Compose)
+- `res/layout/widget_motivation*.xml`, `res/drawable/widget_motivation_*.xml`: layouts and shapes
 
-- [GitHub Sponsors](https://github.com/sponsors/jrs8205) — monthly or one-time
-- [Buy Me a Coffee](https://buymeacoffee.com/jrs8205) — no sign-up needed
+## Status
 
-## License
+- The Claude-written parts (Motivation styling, size and text controls, permission clean-up)
+  were checked for XML validity and bracket balance only. They were **not compiled and not run
+  on a device** by Claude. Build and test them, and open an issue if something breaks.
+- The launcher icon was only checked as a rendered image, not installed on a device.
+- The text-fit in Auto mode is an estimate from average glyph width, not a real measurement.
+- Only RemoteViews-safe views can be used in the widget layouts (`FrameLayout`, `LinearLayout`,
+  `ImageView`, `TextView`). A plain `View` makes the widget fail with "Couldn't add widget".
 
-Licensed under the **Apache License, Version 2.0** — see [LICENSE](LICENSE).
+## Credits
 
-This project adapts design/architecture patterns (re-implemented in Compose) from the
-Android Open Source Project's **Launcher3** (also Apache-2.0); see [NOTICE](NOTICE) for attribution.
+- **ARK-launcher** by [jrs8205](https://github.com/jrs8205/ARK-launcher), the project this is
+  based on (Apache-2.0).
+- **Android Open Source Project, Launcher3**: design and architecture patterns that ARK-launcher
+  re-implemented in Compose (Apache-2.0). See [NOTICE](NOTICE).
+- **Open-Meteo** for weather data (CC BY 4.0) and **BigDataCloud** for place-name lookup, as
+  listed in [NOTICE](NOTICE).
+- **Claude** (Anthropic) wrote the Motivation widget styling, responsive layout, customisation
+  settings, the manifest-driven permission UI and the launcher icon described above.
 
 ## Contributing
 
-Issues and pull requests are welcome — for feature ideas, consider starting a
-[Discussion](https://github.com/jrs8205/ARK-launcher/discussions) first. By contributing you agree
-your contributions are licensed under the project's Apache-2.0 license.
+Issues and pull requests are welcome. For the launcher core, check whether the change belongs in
+[ARK-launcher](https://github.com/jrs8205/ARK-launcher) first; changes to the Motivation widget,
+the icon and the permission handling belong here. By contributing you agree your work is licensed
+under Apache-2.0.
 
-**Translations welcome.** English and Finnish are maintained by the author; the other languages
-have not been reviewed by native speakers yet, so corrections from native speakers are
-especially appreciated — edit the `values-<lang>/strings.xml` files (one per module) and open a pull request.
+## License
+
+Licensed under the **Apache License, Version 2.0**, see [LICENSE](LICENSE). Keep the
+[NOTICE](NOTICE) file and the original copyright notices when you redistribute, and mark files you
+change.
