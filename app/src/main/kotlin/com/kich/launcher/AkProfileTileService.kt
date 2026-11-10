@@ -19,10 +19,9 @@ class AkProfileTileService : TileService() {
 
     override fun onClick() {
         super.onClick()
-        val intent = Intent(this, SettingsActivity::class.java).apply {
-            // Force a fresh SettingsActivity so the open-profile-selector extra is read every time.
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
-            putExtra(SettingsActivity.EXTRA_OPEN_AK_PROFILES, true)
+        // Open the dedicated workspace picker, not the general Settings screen.
+        val intent = Intent(this, AkProfileSwitcherActivity::class.java).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
         }
         if (Build.VERSION.SDK_INT >= 34) {
             val pendingIntent = PendingIntent.getActivity(

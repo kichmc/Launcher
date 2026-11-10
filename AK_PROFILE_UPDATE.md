@@ -1,14 +1,21 @@
 # AK workspace/profile update
 
-This update adds an initial in-launcher AK workspace selector under Settings > AK Workspaces.
+This source includes the initial AK workspace selector and profile-scoped launcher wallpaper storage.
 
-- Up to five workspace profiles can be created.
-- Profiles can be switched and deleted (User 1 is protected).
-- Each profile stores its launcher style, home grid columns, app-drawer grid, theme mode, accent color, and drawer-search preference.
-- The app drawer page indicator now uses One UI-inspired pill/dot pagination instead of a numeric counter.
+## Implemented in this update
+- Each AK workspace has its own launcher wallpaper image file and remembered wallpaper selection/target.
+- Switching the active AK workspace changes which launcher wallpaper `LauncherWallpaperLayer` loads on resume.
+- The existing wallpaper picker now reads/writes the active workspace's wallpaper because it uses `WallpaperStore`.
+- Wallpaper files are keyed by the active AK workspace ID (validated before use).
 
-## Current limitation
-This is the first profile foundation, not full isolated workspaces. Home-screen icon positions, folders, widgets, wallpaper, hidden-app list, and app ordering are still shared between profiles. A Quick Settings tile and home-screen floating/profile shortcut are not included yet. Do not describe these as implemented.
+## Not yet implemented
+- Independent home-screen pages, icon positions, folders and dock layout. The current Room `home_items` table is still shared.
+- Independent widget placement/bindings. Widget IDs are still stored in the shared home layout and need careful profile-aware ownership handling.
+- Independent hidden-app lists. Hidden-app preferences are still shared.
+- A complete workspace data migration/backup/restore flow.
+
+Do not describe these pending items as implemented. They require profile-aware persistence in the Room schema/repositories and migration tests; simply changing the visible profile name would not isolate them.
 
 ## Build verification
-The Gradle compile could not run in this environment because the Gradle distribution could not be downloaded (network DNS unavailable). Please build with the project's normal Gradle setup and test profile switching on-device before release.
+- Source changes were inspected and whitespace checks performed.
+- Gradle compilation and device testing have not been performed in this environment. Build and test on-device before release.

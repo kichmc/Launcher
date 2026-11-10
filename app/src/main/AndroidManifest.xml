@@ -120,6 +120,13 @@
             android:label="@string/settings_label"
             android:theme="@style/Theme.KichLauncher" />
 
+        <activity
+            android:name=".AkProfileSwitcherActivity"
+            android:exported="false"
+            android:label="AK workspaces"
+            android:excludeFromRecents="true"
+            android:theme="@style/Theme.KichLauncher" />
+
         <!-- Other apps' "Add to home screen" (ShortcutManager.requestPinShortcut) and "Add widget"
              (AppWidgetManager.requestPinAppWidget): declaring these actions is what makes the system
              say the launcher supports pin requests. Exported with no category, as the system starts

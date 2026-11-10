@@ -27,19 +27,23 @@ enum class WallpaperTarget(val key: String, val flags: Int) {
  */
 class WallpaperStore(context: Context) {
     private val appContext = context.applicationContext
-    private val file = File(appContext.filesDir, FILE_NAME)
-    private val prefs = appContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+    private val profileId: String get() = appContext.getSharedPreferences("ak_workspace_profiles", Context.MODE_PRIVATE)
+        .getString("active", "user1")?.takeIf { it.matches(Regex("[A-Za-z0-9_-]{1,40}")) } ?: "user1"
+    private fun selectedFile() = File(appContext.filesDir, "wallpaper_selected_${profileId}.jpg")
+    private fun prefs() = appContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+    private fun profileKey(key: String) = "${key}_${profileId}"
 
     /** The target the user last applied (or [WallpaperTarget.BOTH] before any). */
     var lastTarget: WallpaperTarget
-        get() = WallpaperTarget.fromKey(prefs.getString(KEY_TARGET, null))
-        set(value) = prefs.edit().putString(KEY_TARGET, value.key).apply()
+        get() = WallpaperTarget.fromKey(prefs().getString(profileKey(KEY_TARGET), null))
+        set(value) = prefs().edit().putString(profileKey(KEY_TARGET), value.key).apply()
 
     /** Whether the user applied the remembered picture at least once. */
-    val hasApplied: Boolean get() = prefs.getLong(KEY_APPLIED_AT, 0L) > 0L
+    val hasApplied: Boolean get() = prefs().getLong(profileKey(KEY_APPLIED_AT), 0L) > 0L
 
     /** The remembered picture, decoded; null when none was picked or the copy is unreadable. */
     fun loadSelected(): Bitmap? {
+        val file = selectedFile()
         if (!file.exists()) return null
         return runCatching { BitmapFactory.decodeFile(file.absolutePath) }.getOrNull()
     }
@@ -62,8 +66,8 @@ class WallpaperStore(context: Context) {
             return null
         }
         return runCatching {
-            file.outputStream().use { bitmap.compress(Bitmap.CompressFormat.JPEG, 92, it) }
-            prefs.edit().remove(KEY_APPLIED_AT).apply()
+            selectedFile().outputStream().use { bitmap.compress(Bitmap.CompressFormat.JPEG, 92, it) }
+            prefs().edit().remove(profileKey(KEY_APPLIED_AT)).apply()
             bitmap
         }.getOrElse {
             lastError = "could not save a copy: ${it.javaClass.simpleName}"
@@ -109,13 +113,13 @@ class WallpaperStore(context: Context) {
      * Launcher itself. The phone's system (One UI) wallpaper is not touched.
      */
     fun saveLauncherWallpaper(bitmap: Bitmap): Boolean = runCatching {
-        launcherFile(appContext).outputStream().use { bitmap.compress(Bitmap.CompressFormat.JPEG, 92, it) }
+        launcherFile(appContext, profileId).outputStream().use { bitmap.compress(Bitmap.CompressFormat.JPEG, 92, it) }
     }.getOrDefault(false)
 
-    fun hasLauncherWallpaper(): Boolean = launcherFile(appContext).exists()
+    fun hasLauncherWallpaper(): Boolean = launcherFile(appContext, profileId).exists()
 
     fun clearLauncherWallpaper() {
-        launcherFile(appContext).delete()
+        launcherFile(appContext, profileId).delete()
     }
 
     /** True when the system allows apps to change the wallpaper (managed devices may forbid it). */
@@ -128,22 +132,25 @@ class WallpaperStore(context: Context) {
     fun apply(bitmap: Bitmap, target: WallpaperTarget): Boolean = runCatching {
         WallpaperManager.getInstance(appContext).setBitmap(bitmap, null, true, target.flags)
         lastTarget = target
-        prefs.edit().putLong(KEY_APPLIED_AT, System.currentTimeMillis()).apply()
+        prefs().edit().putLong(profileKey(KEY_APPLIED_AT), System.currentTimeMillis()).apply()
         true
     }.getOrDefault(false)
 
     companion object {
-        private fun launcherFile(context: Context) = File(context.applicationContext.filesDir, LAUNCHER_FILE_NAME)
+        private fun launcherFile(context: Context, profileId: String): File =
+            File(context.applicationContext.filesDir, "launcher_wallpaper_${profileId}.jpg")
+
+        private fun activeProfileId(context: Context): String = context.applicationContext
+            .getSharedPreferences("ak_workspace_profiles", Context.MODE_PRIVATE)
+            .getString("active", "user1")?.takeIf { it.matches(Regex("[A-Za-z0-9_-]{1,40}")) } ?: "user1"
 
         /** The launcher's own wallpaper, decoded; null when none is set. Blocking: call off the main thread. */
         fun loadLauncherWallpaper(context: Context): Bitmap? {
-            val file = launcherFile(context)
+            val file = launcherFile(context, activeProfileId(context))
             if (!file.exists()) return null
             return runCatching { BitmapFactory.decodeFile(file.absolutePath) }.getOrNull()
         }
 
-        private const val LAUNCHER_FILE_NAME = "launcher_wallpaper.jpg"
-        private const val FILE_NAME = "wallpaper_selected.jpg"
         private const val PREFS = "kich_wallpaper"
         private const val KEY_TARGET = "target"
         private const val KEY_APPLIED_AT = "applied_at"
