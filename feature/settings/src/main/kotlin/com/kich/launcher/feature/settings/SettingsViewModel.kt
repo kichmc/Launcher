@@ -4,6 +4,12 @@ import androidx.lifecycle.ViewModel
 import com.kich.launcher.data.DrawerWallpaperStore
 import com.kich.launcher.data.DrawerWallpaper
 import android.net.Uri
+import android.content.Context
+import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import org.json.JSONArray
+import org.json.JSONObject
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
@@ -28,6 +34,7 @@ import javax.inject.Inject
 
 @HiltViewModel
 class SettingsViewModel @Inject constructor(
+    @ApplicationContext private val appContext: Context,
     private val repository: SettingsRepository,
     private val homeLayoutRepository: HomeLayoutRepository,
     private val iconPackRepository: IconPackRepository,
@@ -35,6 +42,89 @@ class SettingsViewModel @Inject constructor(
     appRepository: AppRepository,
     private val drawerWallpaper: DrawerWallpaperStore,
 ) : ViewModel() {
+
+    data class AkWorkspaceProfile(val id: String, val name: String, val active: Boolean = false)
+
+    private val profilePrefs by lazy { appContext.getSharedPreferences("ak_workspace_profiles", Context.MODE_PRIVATE) }
+    private val _profiles = MutableStateFlow<List<AkWorkspaceProfile>>(emptyList())
+    val profiles = _profiles.asStateFlow()
+    private val _activeProfileName = MutableStateFlow("User 1")
+    val activeProfileName = _activeProfileName.asStateFlow()
+
+    init {
+        refreshProfiles()
+        viewModelScope.launch {
+            if (!profilePrefs.contains("snapshot_user1")) saveProfileSnapshot("user1", repository.settings.first())
+        }
+    }
+
+    private fun refreshProfiles() {
+        val json = runCatching { JSONArray(profilePrefs.getString("profiles", "[]")) }.getOrDefault(JSONArray())
+        val activeId = profilePrefs.getString("active", "user1") ?: "user1"
+        val list = buildList {
+            for (i in 0 until json.length()) {
+                val item = json.optJSONObject(i) ?: continue
+                val id = item.optString("id")
+                add(AkWorkspaceProfile(id, item.optString("name", "Workspace"), id == activeId))
+            }
+        }.ifEmpty { listOf(AkWorkspaceProfile("user1", "User 1", true)) }
+        _profiles.value = list
+        _activeProfileName.value = list.firstOrNull { it.active }?.name ?: "User 1"
+        if (json.length() == 0) saveProfileList(list)
+    }
+
+    private fun saveProfileList(list: List<AkWorkspaceProfile>) {
+        val array = JSONArray()
+        list.forEach { array.put(JSONObject().put("id", it.id).put("name", it.name)) }
+        profilePrefs.edit().putString("profiles", array.toString()).apply()
+    }
+
+    fun createAkProfile(name: String) {
+        val clean = name.trim().take(24)
+        if (clean.isBlank() || _profiles.value.size >= 5) return
+        val id = "ak_" + java.util.UUID.randomUUID().toString().take(8)
+        viewModelScope.launch {
+            saveProfileSnapshot(id, repository.settings.first())
+            val updated = _profiles.value.map { it.copy(active = false) } + AkWorkspaceProfile(id, clean, true)
+            saveProfileList(updated); profilePrefs.edit().putString("active", id).apply(); refreshProfiles()
+        }
+    }
+
+    fun activateAkProfile(id: String) {
+        val oldId = profilePrefs.getString("active", "user1") ?: "user1"
+        val snapshot = runCatching { JSONObject(profilePrefs.getString("snapshot_$id", "{}")) }.getOrDefault(JSONObject())
+        viewModelScope.launch {
+            saveProfileSnapshot(oldId, repository.settings.first())
+            if (snapshot.length() > 0) {
+                repository.setLauncherStyle(snapshot.optString("style", LauncherSettings.STYLE_UNIVERSAL))
+                repository.setHomeColumns(snapshot.optInt("homeColumns", 4))
+                repository.setDrawerColumns(snapshot.optInt("drawerColumns", 4))
+                repository.setDrawerRows(snapshot.optInt("drawerRows", 6))
+                repository.setThemeMode(snapshot.optString("theme", LauncherSettings.THEME_SYSTEM))
+                repository.setAccentColor(snapshot.optInt("accent", LauncherSettings.ACCENT_DEFAULT))
+                repository.setShowDrawerSearch(snapshot.optBoolean("search", true))
+            }
+            profilePrefs.edit().putString("active", id).apply(); refreshProfiles()
+        }
+    }
+
+    private fun saveProfileSnapshot(id: String, s: LauncherSettings) {
+        profilePrefs.edit().putString("snapshot_$id", JSONObject()
+            .put("style", s.launcherStyle).put("homeColumns", s.homeColumns)
+            .put("drawerColumns", s.drawerColumns).put("drawerRows", s.drawerRows)
+            .put("theme", s.themeMode).put("accent", s.accentColor)
+            .put("search", s.showDrawerSearch).toString()).apply()
+    }
+
+    fun deleteAkProfile(id: String) {
+        if (id == "user1") return
+        val remaining = _profiles.value.filterNot { it.id == id }
+        profilePrefs.edit().remove("snapshot_$id").apply()
+        saveProfileList(remaining)
+        if (profilePrefs.getString("active", "user1") == id) {
+            profilePrefs.edit().putString("active", "user1").apply(); activateAkProfile("user1")
+        } else refreshProfiles()
+    }
 
     /** The user's own picture behind the app drawer, or null (a Telegram request after 0.9.9). */
     val drawerWallpaperPicture: StateFlow<DrawerWallpaper?> = drawerWallpaper.current

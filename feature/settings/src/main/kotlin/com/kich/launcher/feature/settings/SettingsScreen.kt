@@ -41,6 +41,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
@@ -112,6 +113,8 @@ fun SettingsScreen(
     viewModel: SettingsViewModel = hiltViewModel(),
 ) {
     val s by viewModel.settings.collectAsStateWithLifecycle()
+    val akProfiles by viewModel.profiles.collectAsStateWithLifecycle()
+    val activeAkProfileName by viewModel.activeProfileName.collectAsStateWithLifecycle()
     val drawerWallpaper by viewModel.drawerWallpaperPicture.collectAsStateWithLifecycle()
     val allApps by viewModel.apps.collectAsStateWithLifecycle()
     val hiddenKeys by viewModel.hiddenKeys.collectAsStateWithLifecycle()
@@ -128,6 +131,7 @@ fun SettingsScreen(
     var showHiddenManager by rememberSaveable { mutableStateOf(false) }
     var showFolderManager by rememberSaveable { mutableStateOf(false) }
     var showLeftSwipePicker by rememberSaveable { mutableStateOf(false) }
+    var showAkProfiles by rememberSaveable { mutableStateOf(false) }
     var showWeatherAppPicker by rememberSaveable { mutableStateOf(false) }
     var showPageSpeedPicker by rememberSaveable { mutableStateOf(false) }
     var showIconPackPicker by rememberSaveable { mutableStateOf(false) }
@@ -598,6 +602,18 @@ fun SettingsScreen(
                 }
 
                 CollapsibleSection(
+                    title = "AK Workspaces",
+                    collapsed = "ak_workspaces" in s.collapsedSettingsSections,
+                    onToggle = { viewModel.setSectionCollapsed("ak_workspaces", it) },
+                ) {
+                    ExpressiveActionRow(
+                        label = "Active workspace: $activeAkProfileName",
+                        description = "Switch between up to five AK workspace settings profiles.",
+                        onClick = { showAkProfiles = true },
+                    )
+                }
+
+                CollapsibleSection(
                     title = stringResource(R.string.settings_appearance),
                     collapsed = "appearance" in s.collapsedSettingsSections,
                     onToggle = { viewModel.setSectionCollapsed("appearance", it) },
@@ -804,9 +820,40 @@ fun SettingsScreen(
             )
         }
     }
+    if (showAkProfiles) {
+        AlertDialog(
+            onDismissRequest = { showAkProfiles = false },
+            title = { Text("AK workspaces") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    akProfiles.forEach { profile ->
+                        Row(
+                            modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp))
+                                .clickable { viewModel.activateAkProfile(profile.id); showAkProfiles = false }
+                                .padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(profile.name, modifier = Modifier.weight(1f), fontWeight = if (profile.active) FontWeight.Bold else FontWeight.Normal)
+                            if (profile.active) Text("ACTIVE", color = MaterialTheme.colorScheme.primary, fontSize = 11.sp)
+                            else TextButton(onClick = { viewModel.activateAkProfile(profile.id); showAkProfiles = false }) { Text("Switch") }
+                            if (profile.id != "user1") TextButton(onClick = { viewModel.deleteAkProfile(profile.id) }) { Text("Delete") }
+                        }
+                    }
+                    TextButton(
+                        enabled = akProfiles.size < 5,
+                        onClick = { viewModel.createAkProfile("User ${akProfiles.size + 1}") },
+                    ) { Text("+ Add workspace") }
+                    Text("Each workspace saves its own launcher style, grid, theme and search preference. Home icon positions, folders and widgets are currently shared.", style = MaterialTheme.typography.bodySmall)
+                }
+            },
+            confirmButton = { TextButton(onClick = { showAkProfiles = false }) { Text("Done") } },
+        )
+    }
+
 }
 
 /** Free-text "HH:mm, HH:mm" editor for the people batch delivery times. */
+
 @Composable
 private fun BatchTimesEditor(initial: String, onSave: (String) -> Unit, onDismiss: () -> Unit) {
     val p = LocalExpressivePalette.current

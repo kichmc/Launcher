@@ -557,44 +557,6 @@ private fun AppDrawerContent(
                 .nestedScroll(pullConnection),
         ) {
             DragHandle()
-            if (showSearch) {
-                val searchPalette = LocalExpressivePalette.current
-                // Version C: rounded pill, surfaceHi background, Accent cursor, no underline.
-                TextField(
-                    value = query,
-                    onValueChange = onQueryChange,
-                    singleLine = true,
-                    placeholder = { Text(stringResource(R.string.app_drawer_search_hint)) },
-                    trailingIcon = {
-                        if (query.isNotEmpty()) {
-                            IconButton(onClick = { onQueryChange("") }) {
-                                Icon(
-                                    painter = painterResource(LauncherIcons.Close),
-                                    contentDescription = stringResource(R.string.search_clear),
-                                    tint = searchPalette.accent,
-                                )
-                            }
-                        }
-                    },
-                    shape = RoundedCornerShape(20.dp),
-                    colors = TextFieldDefaults.colors(
-                        focusedContainerColor = searchPalette.surfaceHi,
-                        unfocusedContainerColor = searchPalette.surfaceHi,
-                        focusedIndicatorColor = Color.Transparent,
-                        unfocusedIndicatorColor = Color.Transparent,
-                        cursorColor = searchPalette.accent,
-                        focusedTextColor = searchPalette.text,
-                        unfocusedTextColor = searchPalette.text,
-                        // The hint follows the pill's own palette, not the drawer's text (a yellow pill on a
-                        // see-through drawer over a dark wallpaper keeps dark text while the labels are white).
-                        focusedPlaceholderColor = searchPalette.dim,
-                        unfocusedPlaceholderColor = searchPalette.dim,
-                    ),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 12.dp, vertical = 8.dp),
-                )
-            }
             val context = LocalContext.current
             val searching = query.isNotBlank()
             var gridWidthPx by remember { mutableStateOf(0) }
@@ -734,6 +696,7 @@ private fun AppDrawerContent(
             // work app hidden): the pager must not reopen on Work the next time the tab reappears.
             val hasWorkTab = workProfile != null
             LaunchedEffect(hasWorkTab) { if (!hasWorkTab) onSelectTab(DrawerTab.Personal) }
+            Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
             when {
                 searching -> DrawerGrid(gridState, 0.dp, searchContent)
                 // No Work tab: the drawer is exactly the 0.9.1 drawer.
@@ -792,12 +755,23 @@ private fun AppDrawerContent(
                             }
                         }
                         if (pageCount > 1) {
-                            Text(
-                                text = "${appPager.currentPage + 1} / $pageCount",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.align(Alignment.CenterHorizontally).padding(bottom = 6.dp),
-                            )
+                            Row(
+                                modifier = Modifier.align(Alignment.CenterHorizontally).padding(top = 8.dp, bottom = 10.dp),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                repeat(pageCount) { index ->
+                                    Box(
+                                        modifier = Modifier
+                                            .size(width = if (index == appPager.currentPage) 18.dp else 7.dp, height = 7.dp)
+                                            .background(
+                                                color = if (index == appPager.currentPage) MaterialTheme.colorScheme.onSurface
+                                                else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.32f),
+                                                shape = RoundedCornerShape(50),
+                                            ),
+                                    )
+                                }
+                            }
                         }
                     }
                 }
@@ -832,6 +806,45 @@ private fun AppDrawerContent(
                         }
                     }
                 }
+            }
+            }
+            if (showSearch) {
+                val searchPalette = LocalExpressivePalette.current
+                // Version C: rounded pill, surfaceHi background, Accent cursor, no underline.
+                TextField(
+                    value = query,
+                    onValueChange = onQueryChange,
+                    singleLine = true,
+                    placeholder = { Text(stringResource(R.string.app_drawer_search_hint)) },
+                    trailingIcon = {
+                        if (query.isNotEmpty()) {
+                            IconButton(onClick = { onQueryChange("") }) {
+                                Icon(
+                                    painter = painterResource(LauncherIcons.Close),
+                                    contentDescription = stringResource(R.string.search_clear),
+                                    tint = searchPalette.accent,
+                                )
+                            }
+                        }
+                    },
+                    shape = RoundedCornerShape(20.dp),
+                    colors = TextFieldDefaults.colors(
+                        focusedContainerColor = searchPalette.surfaceHi,
+                        unfocusedContainerColor = searchPalette.surfaceHi,
+                        focusedIndicatorColor = Color.Transparent,
+                        unfocusedIndicatorColor = Color.Transparent,
+                        cursorColor = searchPalette.accent,
+                        focusedTextColor = searchPalette.text,
+                        unfocusedTextColor = searchPalette.text,
+                        // The hint follows the pill's own palette, not the drawer's text (a yellow pill on a
+                        // see-through drawer over a dark wallpaper keeps dark text while the labels are white).
+                        focusedPlaceholderColor = searchPalette.dim,
+                        unfocusedPlaceholderColor = searchPalette.dim,
+                    ),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                )
             }
         }
     }
