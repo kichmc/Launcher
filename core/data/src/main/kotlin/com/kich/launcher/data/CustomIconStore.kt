@@ -3,7 +3,6 @@ package com.kich.launcher.data
 import android.content.Context
 import dagger.hilt.android.qualifiers.ApplicationContext
 import android.net.Uri
-import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
