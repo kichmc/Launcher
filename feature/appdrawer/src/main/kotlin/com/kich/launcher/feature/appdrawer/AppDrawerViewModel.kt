@@ -65,6 +65,7 @@ data class AppDrawerUiState(
     val selectedTab: DrawerTab = DrawerTab.Personal,
     val query: String = "",
     val columns: Int = 4,
+    val rows: Int = 6,
     val dockKeys: Set<String> = emptySet(),
     /** Folders in the dock: slots taken like [dockKeys]' apps. */
     val dockFolders: Int = 0,
@@ -171,6 +172,7 @@ class AppDrawerViewModel @Inject constructor(
             apps = apps,
             query = q,
             columns = settings.drawerColumns,
+            rows = settings.drawerRows,
             dockKeys = dockRows.filter { it.isApp && it.key in installed }.mapTo(LinkedHashSet()) { it.key },
             dockFolders = dockRows.count { it.isFolder },
             dockColumns = settings.dockColumns,

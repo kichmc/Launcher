@@ -98,6 +98,8 @@ class SettingsRepository @Inject constructor(
             homeColumns = (p[Keys.HOME_COLUMNS] ?: 4).coerceIn(MIN_COLUMNS, MAX_COLUMNS),
             homeRows = (p[Keys.HOME_ROWS] ?: 6).coerceIn(MIN_ROWS, MAX_ROWS),
             drawerColumns = (p[Keys.DRAWER_COLUMNS] ?: 4).coerceIn(MIN_COLUMNS, MAX_COLUMNS),
+            drawerRows = (p[Keys.DRAWER_ROWS] ?: 6).coerceIn(MIN_ROWS, MAX_ROWS),
+            launcherStyle = (p[Keys.LAUNCHER_STYLE] ?: LauncherSettings.STYLE_UNIVERSAL).let { if (it in LauncherSettings.LAUNCHER_STYLES) it else LauncherSettings.STYLE_UNIVERSAL },
             showDrawerSearch = p[Keys.SHOW_DRAWER_SEARCH] ?: true,
             swipeUpForDrawer = p[Keys.SWIPE_UP_DRAWER] ?: true,
             swipeDownForNotifications = p[Keys.SWIPE_DOWN_NOTIF] ?: true,
@@ -442,6 +444,8 @@ class SettingsRepository @Inject constructor(
     suspend fun setHomeColumns(value: Int) = edit { it[Keys.HOME_COLUMNS] = value.coerceIn(MIN_COLUMNS, MAX_COLUMNS) }
     suspend fun setHomeRows(value: Int) = edit { it[Keys.HOME_ROWS] = value.coerceIn(MIN_ROWS, MAX_ROWS) }
     suspend fun setDrawerColumns(value: Int) = edit { it[Keys.DRAWER_COLUMNS] = value.coerceIn(MIN_COLUMNS, MAX_COLUMNS) }
+    suspend fun setDrawerRows(value: Int) = edit { it[Keys.DRAWER_ROWS] = value.coerceIn(MIN_ROWS, MAX_ROWS) }
+    suspend fun setLauncherStyle(value: String) = edit { it[Keys.LAUNCHER_STYLE] = value.takeIf { style -> style in LauncherSettings.LAUNCHER_STYLES } ?: LauncherSettings.STYLE_UNIVERSAL }
     suspend fun setShowDrawerSearch(value: Boolean) = edit { it[Keys.SHOW_DRAWER_SEARCH] = value }
     suspend fun setSwipeUpForDrawer(value: Boolean) = edit { it[Keys.SWIPE_UP_DRAWER] = value }
     suspend fun setSwipeDownForNotifications(value: Boolean) = edit { it[Keys.SWIPE_DOWN_NOTIF] = value }
@@ -753,6 +757,8 @@ class SettingsRepository @Inject constructor(
         val HOME_COLUMNS = intPreferencesKey("home_columns")
         val HOME_ROWS = intPreferencesKey("home_rows")
         val DRAWER_COLUMNS = intPreferencesKey("drawer_columns")
+        val DRAWER_ROWS = intPreferencesKey("drawer_rows")
+        val LAUNCHER_STYLE = stringPreferencesKey("launcher_style")
         val SHOW_DRAWER_SEARCH = booleanPreferencesKey("show_drawer_search")
         val SWIPE_UP_DRAWER = booleanPreferencesKey("swipe_up_drawer")
         val SWIPE_DOWN_NOTIF = booleanPreferencesKey("swipe_down_notif")
@@ -877,7 +883,7 @@ class SettingsRepository @Inject constructor(
             "status_bar_scrim", "long_press_scale", "drawer_blur_strength", "drawer_picture_dim",
         )
         val INT_KEYS = setOf(
-            "dock_columns", "dock_bottom_spacing", "home_columns", "home_rows", "drawer_columns", "app_label_color",
+            "dock_columns", "dock_bottom_spacing", "home_columns", "home_rows", "drawer_columns", "drawer_rows", "app_label_color",
             "home_page", "home_page_count", "folder_columns", "drawer_background_color", "drawer_label_color",
             "accent_color",
         )
@@ -902,7 +908,7 @@ class SettingsRepository @Inject constructor(
             "notif_widget_count_style", "icon_pack_package", "left_swipe_app_key", "weather_app_key", "home_page_marker",
             "page_switch_speed", "collapsed_settings_sections", "font_family", "theme_mode",
             "people_privacy", "pinned_people", "people_aliases", "people_batch_times",
-            "custom_icons", "folder_icons", "shortcut_icons", "swipe_up_apps",
+            "custom_icons", "folder_icons", "shortcut_icons", "swipe_up_apps", "launcher_style",
         )
 
         /** Preferences holding picked icons ("key\ticon" lines, see [CustomIcon.encode]). */

@@ -8,6 +8,10 @@ data class LauncherSettings(
     /** Home-grid row count — more rows = tighter icon rows + more free cells for widgets. */
     val homeRows: Int = 6,
     val drawerColumns: Int = 4,
+    /** Fixed app-drawer page rows for the horizontal One UI-style drawer. */
+    val drawerRows: Int = 6,
+    /** Visual/layout preset selected by the user; presets never remove apps or content. */
+    val launcherStyle: String = STYLE_UNIVERSAL,
     val showDrawerSearch: Boolean = true,
     val swipeUpForDrawer: Boolean = true,
     val swipeDownForNotifications: Boolean = true,
@@ -169,6 +173,13 @@ data class LauncherSettings(
     val homePageCount: Int = 0,
 ) {
     companion object {
+        const val STYLE_UNIVERSAL = "universal"
+        const val STYLE_ONE_UI = "one_ui"
+        const val STYLE_PIXEL = "pixel"
+        const val STYLE_XIAOMI = "xiaomi"
+        const val STYLE_OPPO = "oppo"
+        val LAUNCHER_STYLES = listOf(STYLE_UNIVERSAL, STYLE_ONE_UI, STYLE_PIXEL, STYLE_XIAOMI, STYLE_OPPO)
+
         const val COUNT_NUMBER = "number"
         const val COUNT_DOT = "dot"
         const val COUNT_NONE = "none"

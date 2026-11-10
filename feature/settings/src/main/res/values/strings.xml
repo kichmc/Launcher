@@ -196,6 +196,13 @@
     <string name="settings_wallpaper_open">Choose wallpaper</string>
     <string name="settings_wallpaper_open_desc">Pick an image and set it for the home screen, lock screen or both</string>
     <string name="settings_appearance">Appearance</string>
+    <string name="settings_launcher_style">Launcher style</string>
+    <string name="settings_launcher_style_desc">Choose a starting layout inspired by popular Android launchers. Your apps, folders and widgets stay in place. Universal keeps your current grid.</string>
+    <string name="style_universal">Universal</string>
+    <string name="style_one_ui">One UI</string>
+    <string name="style_pixel">Pixel</string>
+    <string name="style_xiaomi">Xiaomi</string>
+    <string name="style_oppo">OPPO</string>
     <string name="settings_theme_mode">Theme</string>
     <string name="settings_theme_system">System</string>
     <string name="settings_theme_light">Light</string>

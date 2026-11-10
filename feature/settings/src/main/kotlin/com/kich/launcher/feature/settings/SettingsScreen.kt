@@ -284,6 +284,7 @@ fun SettingsScreen(
                     onToggle = { viewModel.setSectionCollapsed("drawer", it) },
                 ) {
                     StepperRow(stringResource(R.string.settings_columns), s.drawerColumns, 3, 7, viewModel::setDrawerColumns)
+                    StepperRow(stringResource(R.string.settings_rows), s.drawerRows, 5, 10, viewModel::setDrawerRows)
                     SwitchRow(stringResource(R.string.settings_show_labels), s.showDrawerLabels, viewModel::setShowDrawerLabels)
                     SwitchRow(stringResource(R.string.settings_two_line_labels), s.twoLineDrawerLabels, viewModel::setTwoLineDrawerLabels)
                     DrawerLabelColorRow(selected = s.drawerLabelColor, onPick = viewModel::setDrawerLabelColor)
@@ -606,6 +607,34 @@ fun SettingsScreen(
                         accent = s.accentColor,
                         onThemeMode = viewModel::setThemeMode,
                         onAccent = viewModel::setAccentColor,
+                    )
+                    Text(
+                        stringResource(R.string.settings_launcher_style),
+                        style = androidx.compose.material3.MaterialTheme.typography.titleSmall,
+                        modifier = Modifier.padding(start = 16.dp, top = 12.dp, bottom = 4.dp),
+                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        listOf(
+                            LauncherSettings.STYLE_UNIVERSAL to R.string.style_universal,
+                            LauncherSettings.STYLE_ONE_UI to R.string.style_one_ui,
+                            LauncherSettings.STYLE_PIXEL to R.string.style_pixel,
+                            LauncherSettings.STYLE_XIAOMI to R.string.style_xiaomi,
+                            LauncherSettings.STYLE_OPPO to R.string.style_oppo,
+                        ).forEach { (style, label) ->
+                            FilterChip(
+                                selected = s.launcherStyle == style,
+                                onClick = { viewModel.setLauncherStyle(style) },
+                                label = { Text(stringResource(label)) },
+                            )
+                        }
+                    }
+                    Text(
+                        stringResource(R.string.settings_launcher_style_desc),
+                        style = androidx.compose.material3.MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
                     )
                 }
 

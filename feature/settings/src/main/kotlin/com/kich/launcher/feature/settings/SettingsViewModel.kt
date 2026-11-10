@@ -92,6 +92,31 @@ class SettingsViewModel @Inject constructor(
     fun setDockEnabled(value: Boolean) = update { repository.setDockEnabled(value) }
     fun setDockColumns(value: Int) = update { repository.setDockColumns(value) }
     fun setDrawerColumns(value: Int) = update { repository.setDrawerColumns(value) }
+    fun setDrawerRows(value: Int) = update { repository.setDrawerRows(value) }
+
+    /** Applies a layout starting preset while preserving installed apps, folders and widgets. */
+    fun setLauncherStyle(style: String) = update {
+        repository.setLauncherStyle(style)
+        when (style) {
+            LauncherSettings.STYLE_ONE_UI -> {
+                repository.setHomeColumns(4); repository.setDrawerColumns(4); repository.setDrawerRows(6)
+                repository.setShowDrawerSearch(true)
+            }
+            LauncherSettings.STYLE_PIXEL -> {
+                repository.setHomeColumns(4); repository.setDrawerColumns(4); repository.setDrawerRows(5)
+                repository.setShowDrawerSearch(true)
+            }
+            LauncherSettings.STYLE_XIAOMI -> {
+                repository.setHomeColumns(4); repository.setDrawerColumns(5); repository.setDrawerRows(6)
+                repository.setShowDrawerSearch(true)
+            }
+            LauncherSettings.STYLE_OPPO -> {
+                repository.setHomeColumns(4); repository.setDrawerColumns(4); repository.setDrawerRows(6)
+                repository.setShowDrawerSearch(true)
+            }
+            else -> { /* Universal keeps the user's current grid and preferences. */ }
+        }
+    }
     fun setShowDrawerSearch(value: Boolean) = update { repository.setShowDrawerSearch(value) }
     fun setShowFrequentApps(value: Boolean) = update { repository.setShowFrequentApps(value) }
     fun setDrawerOpensAtTop(value: Boolean) = update { repository.setDrawerOpensAtTop(value) }

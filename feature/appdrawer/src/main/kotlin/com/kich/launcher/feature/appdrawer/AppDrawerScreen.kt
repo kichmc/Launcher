@@ -287,6 +287,7 @@ fun AppDrawerScreen(
         mixFolders = uiState.mixDrawerFolders,
         query = uiState.query,
         columns = uiState.columns,
+        rows = uiState.rows,
         badges = badges,
         badgeShowCount = uiState.notificationDotCount,
         badgeScale = uiState.notificationDotScale,
@@ -458,6 +459,7 @@ private fun AppDrawerContent(
     mixFolders: Boolean,
     query: String,
     columns: Int,
+    rows: Int,
     badges: Map<String, Int>,
     badgeShowCount: Boolean,
     badgeScale: Float,
@@ -735,7 +737,70 @@ private fun AppDrawerContent(
             when {
                 searching -> DrawerGrid(gridState, 0.dp, searchContent)
                 // No Work tab: the drawer is exactly the 0.9.1 drawer.
-                workProfile == null -> DrawerGrid(gridState, 0.dp, idleContent)
+                workProfile == null -> {
+                    // One UI-style app drawer: a fixed rows × columns grid, split into horizontal pages.
+                    // Search remains a vertical result list above; the page count follows installed apps/folders.
+                    val firstPageCapacity = (columns * (rows - if (frequentApps.isNotEmpty()) 1 else 0)).coerceAtLeast(1)
+                    val pageCapacity = (columns * rows).coerceAtLeast(1)
+                    val remaining = (entries.size - firstPageCapacity).coerceAtLeast(0)
+                    val pageCount = (1 + (remaining + pageCapacity - 1) / pageCapacity).coerceAtLeast(1)
+                    val appPager = rememberPagerState(pageCount = { pageCount })
+                    Column(Modifier.fillMaxSize()) {
+                        HorizontalPager(
+                            state = appPager,
+                            beyondViewportPageCount = 1,
+                            userScrollEnabled = !dragController.isDragging,
+                            modifier = Modifier.weight(1f),
+                        ) { page ->
+                            val start = if (page == 0) 0 else firstPageCapacity + (page - 1) * pageCapacity
+                            val count = if (page == 0) firstPageCapacity else pageCapacity
+                            val pageEntries = entries.drop(start).take(count)
+                            val pageGridState = rememberLazyGridState()
+                            LazyVerticalGrid(
+                                columns = GridCells.Fixed(columns),
+                                state = pageGridState,
+                                contentPadding = PaddingValues(top = 8.dp, bottom = 8.dp),
+                                modifier = Modifier.fillMaxSize().padding(horizontal = 12.dp),
+                            ) {
+                                if (page == 0 && frequentApps.isNotEmpty()) {
+                                    item(span = { GridItemSpan(maxLineSpan) }, contentType = { "frequent" }) {
+                                        FrequentAppsCard(
+                                            apps = frequentApps, columns = columns, badges = badges,
+                                            badgeShowCount = badgeShowCount, badgeScale = badgeScale,
+                                            showLabels = showLabels, iconSize = drawerIconSize,
+                                            onAppClick = onAppClick, onAppLongClick = onAppLongClick,
+                                        )
+                                    }
+                                }
+                                items(items = pageEntries, key = { it.key }, contentType = { if (it is DrawerEntry.Folder) "folder" else "app" }) { entry ->
+                                    when (entry) {
+                                        is DrawerEntry.Folder -> DrawerFolderTile(
+                                            folder = entry.folder, showLabel = showLabels && showFolderNames,
+                                            tileSize = drawerIconSize,
+                                            badgeCount = entry.folder.apps.sumOf { badges[it.badgeKey] ?: 0 },
+                                            badgeShowCount = badgeShowCount, badgeScale = badgeScale,
+                                            onClick = { bounds -> onFolderClick(entry.folder, bounds) },
+                                            onLongClick = { onFolderLongClick(entry.folder) },
+                                        )
+                                        is DrawerEntry.App -> DrawerAppCell(
+                                            entry.app, badges, badgeShowCount, badgeScale, showLabels, drawerIconSize,
+                                            onAppClick, onAppLongClick, dragController, onDragOutStart, onDropOnHome,
+                                            onDropOnDock, haptics, locked,
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                        if (pageCount > 1) {
+                            Text(
+                                text = "${appPager.currentPage + 1} / $pageCount",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.align(Alignment.CenterHorizontally).padding(bottom = 6.dp),
+                            )
+                        }
+                    }
+                }
                 else -> {
                     // The pager owns the tab while it is on screen (PagerTabRow); the ViewModel
                     // stores the page it rests on, which is where a pager rebuilt after a search
