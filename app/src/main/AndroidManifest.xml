@@ -115,6 +115,24 @@
             android:theme="@style/Theme.KichLauncher" />
 
         <activity
+            android:name=".users.UserManagerActivity"
+            android:exported="false"
+            android:label="AK User Manager"
+            android:theme="@style/Theme.KichLauncher" />
+
+        <service
+            android:name=".users.AkUserTileService"
+            android:label="AK Users"
+            android:icon="@mipmap/ic_launcher_foreground"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+            <meta-data android:name="android.service.quicksettings.ACTIVE_TILE" android:value="true" />
+        </service>
+
+        <activity
             android:name=".SettingsActivity"
             android:exported="false"
             android:label="@string/settings_label"
