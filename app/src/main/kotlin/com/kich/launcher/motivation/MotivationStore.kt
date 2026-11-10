@@ -9,7 +9,14 @@ import org.json.JSONArray
  * background to change it.
  */
 class MotivationStore(context: Context) {
-    private val prefs = context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+    private val appContext = context.applicationContext
+    private val profileId = appContext.getSharedPreferences("ak_workspace_profiles", Context.MODE_PRIVATE)
+        .getString("active", "user1")?.takeIf { it.matches(Regex("[A-Za-z0-9_-]{1,40}")) } ?: "user1"
+    // User 1 keeps the legacy preference file; every other AK workspace gets a separate quote/style store.
+    private val prefs = appContext.getSharedPreferences(
+        if (profileId == "user1") PREFS else "${PREFS}_$profileId",
+        Context.MODE_PRIVATE,
+    )
 
     var intervalMinutes: Int
         get() = prefs.getInt(KEY_INTERVAL, 60)

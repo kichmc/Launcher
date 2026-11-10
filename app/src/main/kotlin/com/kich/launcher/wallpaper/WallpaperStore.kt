@@ -66,7 +66,10 @@ class WallpaperStore(context: Context) {
             return null
         }
         return runCatching {
-            selectedFile().outputStream().use { bitmap.compress(Bitmap.CompressFormat.JPEG, 92, it) }
+            val written = selectedFile().outputStream().use {
+                bitmap.compress(Bitmap.CompressFormat.JPEG, 92, it)
+            }
+            check(written) { "JPEG encoder failed" }
             prefs().edit().remove(profileKey(KEY_APPLIED_AT)).apply()
             bitmap
         }.getOrElse {
@@ -113,8 +116,11 @@ class WallpaperStore(context: Context) {
      * Launcher itself. The phone's system (One UI) wallpaper is not touched.
      */
     fun saveLauncherWallpaper(bitmap: Bitmap): Boolean = runCatching {
-        launcherFile(appContext, profileId).outputStream().use { bitmap.compress(Bitmap.CompressFormat.JPEG, 92, it) }
-    }.getOrDefault(false)
+        val written = launcherFile(appContext, profileId).outputStream().use {
+            bitmap.compress(Bitmap.CompressFormat.JPEG, 92, it)
+        }
+        check(written) { "JPEG encoder failed" }
+    }.isSuccess
 
     fun hasLauncherWallpaper(): Boolean = launcherFile(appContext, profileId).exists()
 

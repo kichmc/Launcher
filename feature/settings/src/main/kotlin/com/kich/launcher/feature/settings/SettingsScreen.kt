@@ -135,6 +135,8 @@ fun SettingsScreen(
     var showFolderManager by rememberSaveable { mutableStateOf(false) }
     var showLeftSwipePicker by rememberSaveable { mutableStateOf(false) }
     var showAkProfiles by rememberSaveable { mutableStateOf(openAkProfiles) }
+    var renamingAkProfileId by rememberSaveable { mutableStateOf("") }
+    var renamingAkProfileName by rememberSaveable { mutableStateOf("") }
     var showWeatherAppPicker by rememberSaveable { mutableStateOf(false) }
     var showPageSpeedPicker by rememberSaveable { mutableStateOf(false) }
     var showIconPackPicker by rememberSaveable { mutableStateOf(false) }
@@ -863,17 +865,44 @@ fun SettingsScreen(
                             Text(profile.name, modifier = Modifier.weight(1f), fontWeight = if (profile.active) FontWeight.Bold else FontWeight.Normal)
                             if (profile.active) Text("ACTIVE", color = MaterialTheme.colorScheme.primary, fontSize = 11.sp)
                             else TextButton(onClick = { viewModel.activateAkProfile(profile.id); showAkProfiles = false }) { Text("Switch") }
-                            if (profile.id != "user1") TextButton(onClick = { viewModel.deleteAkProfile(profile.id) }) { Text("Delete") }
+                            if (profile.id != "user1") {
+                                TextButton(onClick = {
+                                    renamingAkProfileId = profile.id
+                                    renamingAkProfileName = profile.name
+                                }) { Text("Rename") }
+                                TextButton(onClick = { viewModel.deleteAkProfile(profile.id) }) { Text("Delete") }
+                            }
                         }
                     }
                     TextButton(
                         enabled = akProfiles.size < 5,
                         onClick = { viewModel.createAkProfile("User ${akProfiles.size + 1}") },
                     ) { Text("+ Add workspace") }
-                    Text("Each workspace saves its own launcher style, grid, theme and search preference. Home icon positions, folders and widgets are currently shared.", style = MaterialTheme.typography.bodySmall)
+                    Text("Each workspace keeps its own launcher settings, home layout, apps, folders, dock and wallpaper. New workspaces copy app and folder placement; widgets must be added separately.", style = MaterialTheme.typography.bodySmall)
                 }
             },
             confirmButton = { TextButton(onClick = { showAkProfiles = false }) { Text("Done") } },
+        )
+    }
+    if (renamingAkProfileId.isNotEmpty()) {
+        AlertDialog(
+            onDismissRequest = { renamingAkProfileId = "" },
+            title = { Text("Rename workspace") },
+            text = {
+                OutlinedTextField(
+                    value = renamingAkProfileName,
+                    onValueChange = { renamingAkProfileName = it.take(24) },
+                    singleLine = true,
+                    label = { Text("Workspace name") },
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    viewModel.renameAkProfile(renamingAkProfileId, renamingAkProfileName)
+                    renamingAkProfileId = ""
+                }) { Text("Save") }
+            },
+            dismissButton = { TextButton(onClick = { renamingAkProfileId = "" }) { Text("Cancel") } },
         )
     }
 

@@ -1,6 +1,7 @@
 package com.kich.launcher.data
 
 import android.content.Context
+import dagger.hilt.android.qualifiers.ApplicationContext
 import android.net.Uri
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
@@ -19,6 +20,7 @@ import javax.inject.Singleton
 class CustomIconStore @Inject constructor(
     private val settings: SettingsRepository,
     private val source: CustomIconSource,
+    @ApplicationContext private val context: Context,
 ) {
     suspend fun setAppIcon(key: String, icon: CustomIcon?) {
         val old = settings.customIcons.first()[key]
@@ -54,11 +56,22 @@ class CustomIconStore @Inject constructor(
         val used = (settings.customIcons.first().values + settings.folderIcons.first().values + settings.shortcutIcons.first().values)
             .filterIsInstance<CustomIcon.FromFile>()
             .mapTo(HashSet()) { it.name }
+        // Inactive AK workspaces keep their own icon maps in the profile snapshots. Include those
+        // references too, otherwise launching the cleanup after a switch would delete their icons.
+        val snapshots = context.getSharedPreferences("ak_workspace_profiles", Context.MODE_PRIVATE)
+            .all.filterKeys { it.startsWith("snapshot_") }.values.filterIsInstance<String>()
+        val fileNames = Regex("[A-Za-z0-9-]+\\.png")
+        snapshots.forEach { snapshot -> fileNames.findAll(snapshot).forEach { used += it.value } }
         source.files.deleteUnused(used, savedBefore)
     }
 
     private fun dropReplaced(old: CustomIcon?, new: CustomIcon?) {
-        if (old is CustomIcon.FromFile && old != new) source.files.delete(old)
+        if (old !is CustomIcon.FromFile || old == new) return
+        val snapshots = context.getSharedPreferences("ak_workspace_profiles", Context.MODE_PRIVATE)
+            .all.filterKeys { it.startsWith("snapshot_") }.values.filterIsInstance<String>()
+        // A saved inactive workspace may still point at this file. Keep it until no profile snapshot
+        // references it; the regular orphan sweep can remove it after that profile is updated/deleted.
+        if (snapshots.none { it.contains(old.name) }) source.files.delete(old)
     }
 }
 

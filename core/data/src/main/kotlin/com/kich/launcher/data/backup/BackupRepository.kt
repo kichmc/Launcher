@@ -83,7 +83,7 @@ class BackupRepository @Inject constructor(
             settings.importRaw(restoredSettings)
             val importedSettings = settings.snapshot()
             try {
-                homeItemDao.replaceLayout(entities)
+                homeItemDao.replaceLayoutWithFreshIds(entities)
             } catch (t: Throwable) {
                 // Put the old settings back so a failed layout write never leaves half a restore.
                 runCatching { settings.rollbackImport(previousSettings, importedSettings) }

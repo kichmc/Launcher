@@ -5,6 +5,7 @@ import androidx.room.Room
 import com.google.common.truth.Truth.assertThat
 import kotlinx.coroutines.runBlocking
 import com.kich.launcher.data.di.MIGRATION_7_8
+import com.kich.launcher.data.di.MIGRATION_8_9
 import org.json.JSONObject
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -15,8 +16,8 @@ import java.io.File
 
 /**
  * Version 8 adds the app-label table beside the home layout. A phone's version-7 database — built
- * here from the exported schema, as a 1.0.2 install left it — must open on version 8 with the
- * migration alone: Room validates every table against the entities after it runs, so a CREATE that
+ * here from the exported schema, as a 1.0.2 install left it — must open on version 9 with the
+ * migration chain: Room validates every table against the entities after it runs, so a CREATE that
  * differs from the entity's would throw here instead of on the first launch after the update.
  */
 @RunWith(RobolectricTestRunner::class)
@@ -40,7 +41,7 @@ class AppLabelMigrationTest {
         }
 
         val database = Room.databaseBuilder(context, LauncherDatabase::class.java, file.absolutePath)
-            .addMigrations(MIGRATION_7_8)
+            .addMigrations(MIGRATION_7_8, MIGRATION_8_9)
             .allowMainThreadQueries()
             .build()
         try {
@@ -51,7 +52,8 @@ class AppLabelMigrationTest {
                 database.appLabelDao().replaceAll(listOf(AppLabelEntity("com.mail/mail.Main/0", "Mail", "en-US")))
                 assertThat(database.appLabelDao().getAll("en-US").map { it.label }).containsExactly("Mail")
             }
-            assertThat(database.openHelper.readableDatabase.version).isEqualTo(8)
+            assertThat(database.homeItemDao().activeProfileId()).isEqualTo("user1")
+            assertThat(database.openHelper.readableDatabase.version).isEqualTo(9)
         } finally {
             database.close()
         }

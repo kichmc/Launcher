@@ -107,6 +107,12 @@ class BackupRepositoryTest {
             if (fail) throw IllegalStateException("disk full")
             inner.replaceLayout(items)
         }
+
+        override suspend fun replaceLayoutWithFreshIds(items: List<com.kich.launcher.data.local.HomeItemEntity>) {
+            beforeReplace()
+            if (fail) throw IllegalStateException("disk full")
+            inner.replaceLayoutWithFreshIds(items)
+        }
     }
 
     @Test

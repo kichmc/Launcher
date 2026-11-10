@@ -60,6 +60,67 @@ class HomeLayoutRepositoryTest {
     private fun HomeItemEntity.cell() = Triple(page, cellX, cellY)
 
     @Test
+    fun workspaceSnapshotRestoresAppsFoldersDockAndWidgetRowsExactly() = runTest {
+        repo.addToHome(app("snapshot.app"), columns = 4, rows = 6)
+        repo.addToDock(app("snapshot.dock"))
+        repo.addWidgetAt(91, "snapshot/Widget", null, com.kich.launcher.model.WidgetPlacement(0, 2, 0, 2, 2), 4, 6)
+        val saved = repo.snapshotLayout()
+
+        repo.removeFromHome(app("snapshot.app"))
+        repo.removeFromDock(app("snapshot.dock"))
+        repo.restoreLayout(saved)
+
+        assertThat(repo.snapshotLayout()).containsExactlyElementsIn(saved)
+    }
+
+    @Test
+    fun homeAppsAndWidgetsAreIsolatedBetweenAkWorkspaces() = runTest {
+        repo.addToHome(app("user1.app"), columns = 4, rows = 6)
+        assertThat(repo.addWidgetAt(91, "user1/Widget", null,
+            com.kich.launcher.model.WidgetPlacement(0, 1, 0, 2, 2), 4, 6)).isTrue()
+        val user1Layout = repo.snapshotLayout()
+
+        repo.setActiveWorkspace("ak_user2")
+        assertThat(repo.snapshotLayout()).isEmpty()
+        repo.addToHome(app("user2.app"), columns = 4, rows = 6)
+        assertThat(repo.addWidgetAt(92, "user2/Widget", null,
+            com.kich.launcher.model.WidgetPlacement(0, 1, 0, 2, 2), 4, 6)).isTrue()
+        val user2Layout = repo.snapshotLayout()
+        assertThat(repo.allWorkspaceBoundWidgetIds()).containsExactly(91, 92)
+
+        repo.setActiveWorkspace("user1")
+        assertThat(repo.snapshotLayout()).containsExactlyElementsIn(user1Layout)
+        assertThat(repo.allWorkspaceBoundWidgetIds()).containsExactly(91, 92)
+        repo.setActiveWorkspace("ak_user2")
+        assertThat(repo.snapshotLayout()).containsExactlyElementsIn(user2Layout)
+        assertThat(repo.snapshotLayout().map { it.appWidgetId }.filterNotNull()).containsExactly(92)
+    }
+
+    @Test
+    fun cloningIntoAnotherWorkspaceAllocatesNewIdsAndRemapsFolderChildren() = runTest {
+        repo.addToHome(app("clone.app"), columns = 4, rows = 6)
+        repo.addToHome(app("clone.child"), columns = 4, rows = 6)
+        repo.createFolder(app("clone.app"), app("clone.child"), "Clone folder")
+        val source = repo.snapshotLayout()
+        val sourceFolder = source.single { it.isFolder }
+        val sourceChildren = source.filter { it.containerId == sourceFolder.id }
+
+        repo.setActiveWorkspace("ak_clone")
+        repo.cloneLayoutIntoActiveWorkspace(source)
+        val cloned = repo.snapshotLayout()
+        val clonedFolder = cloned.single { it.isFolder }
+        val clonedChildren = cloned.filter { it.containerId == clonedFolder.id }
+
+        assertThat(cloned.map { it.packageName }.filter { it.isNotEmpty() })
+            .containsExactly("clone.app", "clone.child")
+        assertThat(clonedFolder.id).isNotEqualTo(sourceFolder.id)
+        assertThat(clonedChildren.map { it.packageName }).containsExactly("clone.app", "clone.child")
+        assertThat(clonedChildren.map { it.id }).doesNotContain(sourceChildren.first().id)
+        repo.setActiveWorkspace("user1")
+        assertThat(repo.snapshotLayout()).containsExactlyElementsIn(source)
+    }
+
+    @Test
     fun widgetDropKeepsChosenPageAndPushesAnOccupantAtomically() = runTest {
         repo.addToHome(app("a"), columns = 4, rows = 6)
         val target = com.kich.launcher.model.WidgetPlacement(0, 0, 0, 2, 2)

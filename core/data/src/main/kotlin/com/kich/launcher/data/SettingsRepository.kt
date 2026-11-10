@@ -638,15 +638,18 @@ class SettingsRepository @Inject constructor(
      * Snapshot of every persisted preference (name -> value) for backup.
      * Device-local bookkeeping keys are excluded so a restore never reimports another device's
      * state (this also keeps the ≤0.7.11 Drive/updater leftovers on an upgraded device out of new
-     * exports); the volatile per-launch [AppUsageRepository.USAGE_KEY] is excluded because it is
-     * device-local behavioural data, not worth carrying to a new phone.
+     * exports). The volatile [AppUsageRepository.USAGE_KEY] is excluded by default for backups,
+     * but can be included in an on-device AK workspace snapshot so frequent-app ranking is isolated.
      */
-    suspend fun exportRaw(): Map<String, Any> =
+    suspend fun exportRaw(
+        includeLocalImages: Boolean = false,
+        includeAppUsage: Boolean = false,
+    ): Map<String, Any> =
         dataStore.data.first().asMap().entries
-            .filterNot { it.key.name in DEVICE_LOCAL_KEYS || it.key.name == AppUsageRepository.USAGE_KEY }
+            .filterNot { it.key.name in DEVICE_LOCAL_KEYS || (!includeAppUsage && it.key.name == AppUsageRepository.USAGE_KEY) }
             .mapNotNull { (k, v) ->
                 // A gallery image is a file on this phone: only icon-pack icons go in the backup.
-                if (k.name in ICON_PREFS && v is String) {
+                if (k.name in ICON_PREFS && v is String && !includeLocalImages) {
                     serializeIcons(parseIcons(v).filterValues { it is CustomIcon.FromPack }).takeIf { it.isNotEmpty() }?.let { k.name to it }
                 } else {
                     k.name to v
@@ -661,10 +664,14 @@ class SettingsRepository @Inject constructor(
      * to their JSON type.
      *
      * Device-local state (the local file-backup time, first-run/onboarding flags, batch-held
-     * notification keys and usage stats) is snapshotted before the clear and re-applied afterward,
-     * so restoring a backup never wipes this device's local state.
+     * notification keys and, by default, usage stats) is snapshotted before the clear and re-applied
+     * afterward. Workspace restores can opt to replace usage stats with the target profile's copy.
      */
-    suspend fun importRaw(values: Map<String, Any>) {
+    suspend fun importRaw(
+        values: Map<String, Any>,
+        preserveLocalImages: Boolean = true,
+        preserveAppUsage: Boolean = true,
+    ) {
         dataStore.edit { prefs ->
             // Snapshot device-local bookkeeping before clearing.
             val localLastBackup = prefs[Keys.LOCAL_LAST_BACKUP]
@@ -676,23 +683,23 @@ class SettingsRepository @Inject constructor(
             // The picked sounds' file permissions belong to this phone (see DEVICE_LOCAL_KEYS).
             val lockSound = prefs[Keys.LOCK_SOUND_URI]
             val unlockSound = prefs[Keys.UNLOCK_SOUND_URI]
-            // Device-local usage stats aren't in the backup (see exportRaw) — preserve this device's.
-            val appUsage = prefs[stringPreferencesKey(AppUsageRepository.USAGE_KEY)]
+            // Backups and ordinary imports preserve usage stats; workspace restores opt into replacement.
+            val appUsage = if (preserveAppUsage) prefs[stringPreferencesKey(AppUsageRepository.USAGE_KEY)] else null
             // Gallery images are files on this phone (not in a backup): keep them for the apps, the
             // pinned shortcuts and the home folders the backup picks no icon for. Not for drawer folders: their ids come back
             // (max + 1), so the folder the backup has under an id may not be the one with the picture.
             // A picture left unused this way goes at the next start (CustomIconStore.deleteUnusedPictures).
-            val localImages = ICON_PREFS.associateWith { name ->
+            val localImages = if (preserveLocalImages) ICON_PREFS.associateWith { name ->
                 parseIcons(prefs[stringPreferencesKey(name)]).filter { (key, icon) ->
                     icon is CustomIcon.FromFile && !(name == Keys.FOLDER_ICONS.name && FolderIconKey.isDrawer(key))
                 }
-            }
+            } else emptyMap()
             prefs.clear()
             for ((name, value) in values) {
                 when {
                     // Device-local bookkeeping is excluded from export, but a hand-edited (or old,
                     // ≤0.7.11 Drive-era) file could smuggle a value in — never import these names.
-                    name in DEVICE_LOCAL_KEYS || name == AppUsageRepository.USAGE_KEY -> Unit
+                    name in DEVICE_LOCAL_KEYS || (name == AppUsageRepository.USAGE_KEY && preserveAppUsage) -> Unit
                     // Known keys are written ONLY with their registered type — a wrong-typed value
                     // in an edited/corrupted file would otherwise be stored under the same key name
                     // and crash every settings read with a ClassCastException.

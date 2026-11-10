@@ -1,6 +1,7 @@
 package com.kich.launcher.data.local
 
 import androidx.room.Entity
+import androidx.room.ColumnInfo
 import androidx.room.Index
 import androidx.room.PrimaryKey
 
@@ -17,13 +18,13 @@ import androidx.room.PrimaryKey
  *  - **App or folder in the dock**: [containerId] = [DOCK], [page] 0, [cellY] 0, [cellX] = the slot
  *    (0..n-1, the dock's order). A dock folder's children point at its id like a home folder's.
  *
- * The unique index on (containerId, page, cellX, cellY) enforces "one item per cell" *within each
- * container* (the home grid, the dock and each folder are independent cell spaces) — see
+ * The unique index on (profileId, containerId, page, cellX, cellY) enforces "one item per cell" *within each
+ * workspace and container* (the home grid, the dock and each folder are independent cell spaces) — see
  * [HomeLayoutRepository].
  */
 @Entity(
     tableName = "home_items",
-    indices = [Index(value = ["containerId", "page", "cellX", "cellY"], unique = true)],
+    indices = [Index(value = ["profileId", "containerId", "page", "cellX", "cellY"], unique = true)],
 )
 data class HomeItemEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
@@ -45,6 +46,8 @@ data class HomeItemEntity(
     val widgetProvider: String? = null,
     /** Non-null → a built-in launcher widget (see [BUILTIN_SMARTSPACE]) occupying spanX×spanY cells. */
     val builtinType: String? = null,
+    /** AK virtual workspace owner. Android app data itself remains device-wide. */
+    @ColumnInfo(defaultValue = "'user1'") val profileId: String = "user1",
 ) {
     /** Matches AppItem.key so app entities can be resolved against the live app list. */
     val key: String get() = "$packageName/$className/$userSerial"

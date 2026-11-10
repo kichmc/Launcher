@@ -4,7 +4,9 @@ import androidx.lifecycle.ViewModel
 import com.kich.launcher.data.DrawerWallpaperStore
 import com.kich.launcher.data.DrawerWallpaper
 import android.net.Uri
+import java.io.File
 import android.content.Context
+import android.content.Intent
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -21,6 +23,9 @@ import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import com.kich.launcher.data.AppRepository
 import com.kich.launcher.data.CustomIconStore
 import com.kich.launcher.data.DrawerFolder
@@ -30,6 +35,7 @@ import com.kich.launcher.data.IconPackRepository
 import com.kich.launcher.data.SettingsRepository
 import com.kich.launcher.model.AppItem
 import com.kich.launcher.model.LauncherSettings
+import com.kich.launcher.data.local.HomeItemEntity
 import javax.inject.Inject
 
 @HiltViewModel
@@ -47,6 +53,8 @@ class SettingsViewModel @Inject constructor(
 
     private val profilePrefs by lazy { appContext.getSharedPreferences("ak_workspace_profiles", Context.MODE_PRIVATE) }
     private val _profiles = MutableStateFlow<List<AkWorkspaceProfile>>(emptyList())
+    /** Shared across SettingsViewModel instances (Settings screen + Quick Settings activity). */
+    private val profileMutex = AkProfileMutationLock.mutex
 
     val profiles = _profiles.asStateFlow()
     private val _activeProfileName = MutableStateFlow("User 1")
@@ -55,7 +63,30 @@ class SettingsViewModel @Inject constructor(
     init {
         refreshProfiles()
         viewModelScope.launch {
-            if (!profilePrefs.contains("snapshot_user1")) saveProfileSnapshot("user1", repository.settings.first())
+            profileMutex.withLock {
+                // Room now keeps a physical partition for every AK workspace. On an upgrade, the
+                // existing shared rows are User 1's rows; other users are imported once from their
+                // last snapshot. Thereafter switching only changes the active partition selector.
+                val activeId = activeProfileId()
+                // Before v9 all rows lived in one table; migration assigns them to User 1.
+                val legacyUser1Layout = homeLayoutRepository.snapshotLayout()
+                homeLayoutRepository.setActiveWorkspace(activeId)
+                // The pre-partition Room table is migrated wholesale into User 1. Never replace it
+                // with a potentially stale JSON snapshot, even if User 2 was active during upgrade.
+                profilePrefs.edit().putBoolean("layout_partitioned_user1", true).commit()
+                val partitionKey = "layout_partitioned_$activeId"
+                if (!profilePrefs.getBoolean(partitionKey, false)) {
+                    if (activeId != "user1") {
+                        val saved = runCatching { JSONObject(profilePrefs.getString("snapshot_$activeId", "{}")) }
+                            .getOrDefault(JSONObject())
+                        val savedLayout = saved.optJSONArray("homeLayout")?.let(::decodeHomeLayout)
+                            ?: legacyUser1Layout.filterNot { it.isWidget || it.isBuiltin || it.hasFootprint }
+                        homeLayoutRepository.cloneLayoutIntoActiveWorkspace(savedLayout)
+                    }
+                    profilePrefs.edit().putBoolean(partitionKey, true).commit()
+                }
+                if (activeId == "user1" && !profilePrefs.contains("snapshot_user1")) saveProfileSnapshot("user1")
+            }
         }
     }
 
@@ -93,49 +124,204 @@ class SettingsViewModel @Inject constructor(
 
     fun createAkProfile(name: String) {
         val clean = name.trim().take(24)
-        if (clean.isBlank() || _profiles.value.size >= 5) return
-        val id = "ak_" + java.util.UUID.randomUUID().toString().take(8)
+        if (clean.isBlank()) return
         viewModelScope.launch {
-            saveProfileSnapshot(id, repository.settings.first())
-            val updated = _profiles.value.map { it.copy(active = false) } + AkWorkspaceProfile(id, clean, true)
-            saveProfileList(updated); profilePrefs.edit().putString("active", id).apply(); refreshProfiles()
+            profileMutex.withLock {
+                if (_profiles.value.size >= 5) return@withLock
+                val oldId = activeProfileId()
+                val originalLayout = homeLayoutRepository.snapshotLayout()
+                saveProfileSnapshot(oldId)
+
+                val id = "ak_" + java.util.UUID.randomUUID().toString().take(8)
+                // A new workspace starts with the current settings as a useful default, but gets
+                // its own snapshot from the moment it is created.
+                // Clone the app/folder arrangement, but do not duplicate bound widget IDs: Android
+                // widgets are device-owned instances. The new workspace can add its own widgets.
+                val clonedLayout = homeLayoutRepository.snapshotLayout().filterNot { it.isWidget || it.isBuiltin || it.hasFootprint }
+                saveProfileSnapshot(id, clonedLayout)
+                try {
+                    homeLayoutRepository.setActiveWorkspace(id)
+                    homeLayoutRepository.cloneLayoutIntoActiveWorkspace(clonedLayout)
+                    profilePrefs.edit().putBoolean("layout_partitioned_$id", true).commit()
+                    val updated = _profiles.value.map { it.copy(active = false) } +
+                        AkWorkspaceProfile(id, clean, true)
+                    saveProfileList(updated)
+                    check(withContext(Dispatchers.IO) { profilePrefs.edit().putString("active", id).commit() })
+                    drawerWallpaper.reloadForActiveProfile()
+                    refreshMotivationWidget()
+                    refreshProfiles()
+                } catch (_: Exception) {
+                    runCatching { homeLayoutRepository.setActiveWorkspace(oldId) }
+                    runCatching { homeLayoutRepository.restoreLayout(originalLayout) }
+                    profilePrefs.edit().putString("active", oldId)
+                        .remove("layout_partitioned_$id").remove("snapshot_$id").commit()
+                    saveProfileList(_profiles.value)
+                }
+            }
+        }
+    }
+
+    fun renameAkProfile(id: String, name: String) {
+        val clean = name.trim().take(24)
+        if (clean.isBlank()) return
+        viewModelScope.launch {
+            profileMutex.withLock {
+                val current = _profiles.value
+                if (current.none { it.id == id }) return@withLock
+                val updated = current.map { if (it.id == id) it.copy(name = clean) else it }
+                saveProfileList(updated)
+                refreshProfiles()
+            }
         }
     }
 
     fun activateAkProfile(id: String) {
-        val oldId = profilePrefs.getString("active", "user1") ?: "user1"
-        val snapshot = runCatching { JSONObject(profilePrefs.getString("snapshot_$id", "{}")) }.getOrDefault(JSONObject())
         viewModelScope.launch {
-            saveProfileSnapshot(oldId, repository.settings.first())
-            if (snapshot.length() > 0) {
+            profileMutex.withLock {
+                if (_profiles.value.none { it.id == id }) return@withLock
+                activateProfileLocked(id, saveCurrent = true)
+            }
+        }
+    }
+
+    /** Must be called while [profileMutex] is held. */
+    private suspend fun activateProfileLocked(id: String, saveCurrent: Boolean) {
+        val oldId = activeProfileId()
+        if (oldId == id) return
+        if (saveCurrent) saveProfileSnapshot(oldId)
+
+        // Settings remain snapshot-based, but Room layouts now live in separate profileId
+        // partitions. Select the target partition first; import a legacy snapshot only once, then
+        // publish the SharedPreferences active id after settings/layout are ready.
+        val snapshot = runCatching {
+            JSONObject(profilePrefs.getString("snapshot_$id", "{}"))
+        }.getOrDefault(JSONObject())
+        val beforeSettings = repository.exportRaw(includeLocalImages = true, includeAppUsage = true)
+        val beforeLayout = homeLayoutRepository.snapshotLayout()
+        try {
+            homeLayoutRepository.setActiveWorkspace(id)
+            val partitionKey = "layout_partitioned_$id"
+            val needsLayoutImport = !profilePrefs.getBoolean(partitionKey, false)
+            val settingsObject = snapshot.optJSONObject("settings")
+            if (settingsObject != null) {
+                repository.importRaw(jsonToPreferenceMap(settingsObject), preserveLocalImages = false, preserveAppUsage = false)
+            } else if (snapshot.length() > 0) {
+                // One-time migration from the original seven-setting workspace format.
                 repository.setLauncherStyle(snapshot.optString("style", LauncherSettings.STYLE_UNIVERSAL))
-                repository.setHomeColumns(snapshot.optInt("homeColumns", 4))
-                repository.setDrawerColumns(snapshot.optInt("drawerColumns", 4))
-                repository.setDrawerRows(snapshot.optInt("drawerRows", 6))
+                repository.setHomeColumns(snapshot.optInt("homeColumns", 4).coerceIn(1, 12))
+                repository.setDrawerColumns(snapshot.optInt("drawerColumns", 4).coerceIn(1, 12))
+                repository.setDrawerRows(snapshot.optInt("drawerRows", 6).coerceIn(1, 20))
                 repository.setThemeMode(snapshot.optString("theme", LauncherSettings.THEME_SYSTEM))
                 repository.setAccentColor(snapshot.optInt("accent", LauncherSettings.ACCENT_DEFAULT))
                 repository.setShowDrawerSearch(snapshot.optBoolean("search", true))
             }
-            profilePrefs.edit().putString("active", id).apply(); refreshProfiles()
+            if (needsLayoutImport) {
+                val savedLayout = snapshot.optJSONArray("homeLayout")?.let(::decodeHomeLayout)
+                val initialLayout = savedLayout
+                    ?: beforeLayout.filterNot { it.isWidget || it.isBuiltin || it.hasFootprint }
+                homeLayoutRepository.cloneLayoutIntoActiveWorkspace(initialLayout)
+                check(profilePrefs.edit().putBoolean(partitionKey, true).commit())
+            }
+            check(withContext(Dispatchers.IO) { profilePrefs.edit().putString("active", id).commit() })
+        } catch (_: Exception) {
+            // Restore the previous Room partition before restoring its layout.
+            runCatching { homeLayoutRepository.setActiveWorkspace(oldId) }
+            runCatching { repository.importRaw(beforeSettings, preserveLocalImages = false, preserveAppUsage = false) }
+            runCatching { homeLayoutRepository.restoreLayout(beforeLayout) }
+            profilePrefs.edit().putString("active", oldId).commit()
+            return
+        }
+        drawerWallpaper.reloadForActiveProfile()
+        refreshMotivationWidget()
+        refreshProfiles()
+    }
+
+    private fun refreshMotivationWidget() {
+        appContext.sendBroadcast(Intent("com.kich.launcher.motivation.PROFILE_CHANGED").setPackage(appContext.packageName))
+    }
+
+    private fun activeProfileId(): String = profilePrefs.getString("active", "user1")
+        ?.takeIf { it.matches(Regex("[A-Za-z0-9_-]{1,40}")) } ?: "user1"
+
+    /** Persists launcher preferences and a compatibility layout snapshot for one-time migrations. */
+    private suspend fun saveProfileSnapshot(id: String, layoutOverride: List<HomeItemEntity>? = null) {
+        val preferences = repository.exportRaw(includeLocalImages = true, includeAppUsage = true)
+        val settingsJson = JSONObject()
+        preferences.forEach { (key, value) -> settingsJson.put(key, value) }
+        val layout = JSONArray().apply {
+            (layoutOverride ?: homeLayoutRepository.snapshotLayout()).forEach { row ->
+                put(JSONObject()
+                    .put("id", row.id).put("containerId", row.containerId)
+                    .put("folderName", row.folderName).put("packageName", row.packageName)
+                    .put("className", row.className).put("userSerial", row.userSerial)
+                    .put("shortcutId", row.shortcutId).put("page", row.page)
+                    .put("cellX", row.cellX).put("cellY", row.cellY)
+                    .put("spanX", row.spanX).put("spanY", row.spanY)
+                    .put("appWidgetId", row.appWidgetId).put("widgetProvider", row.widgetProvider)
+                    .put("builtinType", row.builtinType))
+            }
+        }
+        val snapshot = JSONObject().put("version", 2).put("settings", settingsJson).put("homeLayout", layout)
+        check(withContext(Dispatchers.IO) { profilePrefs.edit().putString("snapshot_$id", snapshot.toString()).commit() }) {
+            "Could not save AK workspace snapshot"
         }
     }
 
-    private fun saveProfileSnapshot(id: String, s: LauncherSettings) {
-        profilePrefs.edit().putString("snapshot_$id", JSONObject()
-            .put("style", s.launcherStyle).put("homeColumns", s.homeColumns)
-            .put("drawerColumns", s.drawerColumns).put("drawerRows", s.drawerRows)
-            .put("theme", s.themeMode).put("accent", s.accentColor)
-            .put("search", s.showDrawerSearch).toString()).apply()
+    private fun jsonToPreferenceMap(json: JSONObject): Map<String, Any> = buildMap {
+        val keys = json.keys()
+        while (keys.hasNext()) {
+            val key = keys.next()
+            val value = json.opt(key) ?: continue
+            when (value) {
+                is Boolean, is String, is Number -> put(key, value)
+            }
+        }
+    }
+
+    private fun decodeHomeLayout(array: JSONArray): List<HomeItemEntity> = buildList {
+        for (index in 0 until array.length()) {
+            val item = array.optJSONObject(index) ?: continue
+            add(HomeItemEntity(
+                id = item.optLong("id"), containerId = item.optLong("containerId", HomeItemEntity.HOME),
+                folderName = if (item.isNull("folderName")) null else item.optString("folderName"),
+                packageName = item.optString("packageName"), className = item.optString("className"),
+                userSerial = item.optLong("userSerial"),
+                shortcutId = if (item.isNull("shortcutId")) null else item.optString("shortcutId"),
+                page = item.optInt("page"), cellX = item.optInt("cellX"), cellY = item.optInt("cellY"),
+                spanX = item.optInt("spanX", 1).coerceAtLeast(1), spanY = item.optInt("spanY", 1).coerceAtLeast(1),
+                appWidgetId = if (item.isNull("appWidgetId")) null else item.optInt("appWidgetId"),
+                widgetProvider = if (item.isNull("widgetProvider")) null else item.optString("widgetProvider"),
+                builtinType = if (item.isNull("builtinType")) null else item.optString("builtinType"),
+            ))
+        }
     }
 
     fun deleteAkProfile(id: String) {
         if (id == "user1") return
-        val remaining = _profiles.value.filterNot { it.id == id }
-        profilePrefs.edit().remove("snapshot_$id").apply()
-        saveProfileList(remaining)
-        if (profilePrefs.getString("active", "user1") == id) {
-            profilePrefs.edit().putString("active", "user1").apply(); activateAkProfile("user1")
-        } else refreshProfiles()
+        viewModelScope.launch {
+            profileMutex.withLock {
+                if (_profiles.value.none { it.id == id }) return@withLock
+                // Restore User 1 while the deleted profile is still the recorded active profile.
+                // Setting active=user1 before this call would make the old-profile snapshot write
+                // overwrite User 1's own saved snapshot with the deleted profile's settings.
+                if (activeProfileId() == id) {
+                    activateProfileLocked("user1", saveCurrent = false)
+                }
+                val remaining = _profiles.value.filterNot { it.id == id }
+                homeLayoutRepository.deleteWorkspace(id)
+                profilePrefs.edit().remove("snapshot_$id").remove("layout_partitioned_$id").apply()
+                // Remove files owned only by the deleted virtual workspace. User 1 is protected
+                // above and its legacy drawer-wallpaper directory is never touched here.
+                File(appContext.filesDir, "wallpaper_selected_$id.jpg").delete()
+                File(appContext.filesDir, "launcher_wallpaper_$id.jpg").delete()
+                File(appContext.filesDir, "drawer_wallpaper/$id").deleteRecursively()
+                appContext.getSharedPreferences("kich_wallpaper", Context.MODE_PRIVATE).edit()
+                    .remove("target_$id").remove("applied_at_$id").apply()
+                appContext.getSharedPreferences("kich_motivation_$id", Context.MODE_PRIVATE).edit().clear().apply()
+                saveProfileList(remaining)
+                refreshProfiles()
+            }
+        }
     }
 
     /** The user's own picture behind the app drawer, or null (a Telegram request after 0.9.9). */
@@ -305,4 +491,10 @@ class SettingsViewModel @Inject constructor(
     private fun update(block: suspend () -> Unit) {
         viewModelScope.launch { block() }
     }
+}
+
+
+/** One process-wide lock because the Settings screen and QS switcher own different ViewModels. */
+private object AkProfileMutationLock {
+    val mutex = Mutex()
 }

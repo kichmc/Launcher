@@ -70,6 +70,17 @@ internal val MIGRATION_7_8 = object : Migration(7, 8) {
     }
 }
 
+/** v9: partition home items by AK workspace; existing rows belong to User 1. */
+internal val MIGRATION_8_9 = object : Migration(8, 9) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE home_items ADD COLUMN profileId TEXT NOT NULL DEFAULT 'user1'")
+        db.execSQL("DROP INDEX IF EXISTS index_home_items_containerId_page_cellX_cellY")
+        db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS index_home_items_profileId_containerId_page_cellX_cellY ON home_items(profileId, containerId, page, cellX, cellY)")
+        db.execSQL("CREATE TABLE IF NOT EXISTS workspace_state (id INTEGER NOT NULL PRIMARY KEY, activeProfileId TEXT NOT NULL)")
+        db.execSQL("INSERT OR IGNORE INTO workspace_state(id, activeProfileId) VALUES (1, 'user1')")
+    }
+}
+
 @Module
 @InstallIn(SingletonComponent::class)
 object DataModule {
@@ -114,7 +125,7 @@ object DataModule {
             // pre-v5 dev versions (1–4, which never shipped a migration) so an old test install resets
             // instead of crashing; v5 onward is migrated, so the user's home layout survives upgrades.
             .fallbackToDestructiveMigrationFrom(dropAllTables = true, 1, 2, 3, 4)
-            .addMigrations(MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8)
+            .addMigrations(MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9)
             .build()
 
     @Provides

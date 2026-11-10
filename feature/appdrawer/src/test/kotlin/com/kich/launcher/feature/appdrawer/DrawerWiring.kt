@@ -99,7 +99,7 @@ internal class DrawerWiring(private val context: Application, testScope: TestSco
         SearchAggregator(setOf(AppSearchProvider(appRepository, settingsRepository))),
         appUsageRepository,
         workProfileRepository,
-        CustomIconStore(settingsRepository, CustomIconSource(context, iconPacks)),
+        CustomIconStore(settingsRepository, CustomIconSource(context, iconPacks), context),
         drawerWallpaper,
     )
 

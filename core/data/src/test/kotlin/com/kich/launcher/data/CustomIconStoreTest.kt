@@ -25,7 +25,7 @@ class CustomIconStoreTest {
     private val context: Application = RuntimeEnvironment.getApplication()
     private val settings = SettingsRepository(InMemoryDataStore())
     private val source = CustomIconSource(context, IconPackRepository(context))
-    private val store = CustomIconStore(settings, source)
+    private val store = CustomIconStore(settings, source, context)
     private val pack = CustomIcon.FromPack("com.example.pack", "mail")
 
     private fun image() = source.files.save(Bitmap.createBitmap(8, 8, Bitmap.Config.ARGB_8888).apply { eraseColor(Color.RED) })
@@ -48,6 +48,17 @@ class CustomIconStoreTest {
 
         assertThat(settings.folderIcons.first()).isEmpty()
         assertThat(source.drawable(picture)).isNull()
+    }
+
+    @Test fun replacingAnImageKeepsItWhenAnInactiveWorkspaceSnapshotReferencesIt() = runTest {
+        val first = image()
+        store.setAppIcon("com.mail/Main/0", first)
+        context.getSharedPreferences("ak_workspace_profiles", android.content.Context.MODE_PRIVATE)
+            .edit().putString("snapshot_ak_other", "{\"icon\":\"${first.name}\"}").commit()
+
+        store.setAppIcon("com.mail/Main/0", pack)
+
+        assertThat(source.drawable(first)).isNotNull()
     }
 
     @Test fun keepingTheSameImageKeepsItsFile() = runTest {

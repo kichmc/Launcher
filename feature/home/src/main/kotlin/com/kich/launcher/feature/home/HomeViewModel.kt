@@ -657,6 +657,8 @@ class HomeViewModel @Inject constructor(
     /** Device-local ids of all bound widgets (for the startup AppWidgetHost id reconcile). */
     suspend fun boundWidgetIds(): Set<Int> = homeLayoutRepository.boundWidgetIds()
 
+    suspend fun allWorkspaceBoundWidgetIds(): Set<Int> = homeLayoutRepository.allWorkspaceBoundWidgetIds()
+
     /** The dock's shown slots in their new order; rows the column cap hides keep their place after them. */
     fun reorderDock(newOrder: List<DockEntry>) =
         viewModelScope.launch { homeLayoutRepository.reorderDock(newOrder.map { it.rowId }) }

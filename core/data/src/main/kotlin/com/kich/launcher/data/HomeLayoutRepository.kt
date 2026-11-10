@@ -46,11 +46,11 @@ enum class PlaceResult {
 }
 
 /**
- * Persists the home layout (Room): app shortcuts and folders placed at free cells, and the apps
- * inside each folder. Top-level items live in the [HOME] container, the dock's apps and folders in
- * the [DOCK] container (slot = cellX); a folder's children live in the container identified by the
- * folder row's id. Each container is an independent cell space guarded by the unique (containerId,
- * page, cellX, cellY) index, so the swaps/repacks below stay collision-free.
+ * Persists the home layout (Room) separately for each AK workspace: app shortcuts and folders
+ * placed at free cells, and the apps inside each folder. Top-level items live in the [HOME] container,
+ * the dock's apps and folders in [DOCK] (slot = cellX); a folder's children live in the container
+ * identified by the folder row's id. Each workspace/container cell space is guarded by the unique
+ * (profileId, containerId, page, cellX, cellY) index.
  */
 @Singleton
 class HomeLayoutRepository @Inject constructor(
@@ -60,6 +60,34 @@ class HomeLayoutRepository @Inject constructor(
 ) {
     /** All rows (home items, folders, folder children); the ViewModel partitions by container. */
     val homeItems: Flow<List<HomeItemEntity>> = dao.observeAll()
+
+    /** A stable copy of this workspace's complete home layout, including folders and widget rows. */
+    suspend fun snapshotLayout(): List<HomeItemEntity> = dao.getAllOnce()
+
+    /** Atomically replaces the complete home layout with a previously saved workspace snapshot. */
+    suspend fun restoreLayout(items: List<HomeItemEntity>) {
+        db.withTransaction { dao.replaceLayout(items) }
+    }
+
+    /** Copies another workspace's rows safely, allocating new global Room IDs and remapping folders. */
+    suspend fun cloneLayoutIntoActiveWorkspace(items: List<HomeItemEntity>) {
+        db.withTransaction { dao.replaceLayoutWithFreshIds(items) }
+    }
+
+    /** Switches the Room query/insert partition without copying or deleting another workspace. */
+    suspend fun setActiveWorkspace(profileId: String) {
+        require(profileId.matches(Regex("[A-Za-z0-9_-]{1,40}")))
+        db.withTransaction { dao.setActiveProfileId(profileId) }
+    }
+
+    suspend fun deleteWorkspace(profileId: String) {
+        db.withTransaction { dao.deleteProfile(profileId) }
+    }
+
+    suspend fun hasWorkspaceLayout(profileId: String): Boolean = dao.profileRowCount(profileId) > 0
+
+    private suspend fun insertActive(item: HomeItemEntity): Long =
+        dao.insert(item.copy(profileId = dao.activeProfileId() ?: "user1"))
 
     /** Puts [appItem] at the first free home cell. True when it is on home afterwards (placed now or
      *  already there); false — nothing stored — when every page the pager shows is full. */
@@ -72,7 +100,7 @@ class HomeLayoutRepository @Inject constructor(
             }
             val (page, cellX, cellY) = firstFreeCell(dao.getContainer(HOME), columns, rows)
             if (!isShownPage(page)) return@withTransaction false
-            dao.insert(homeApp(appItem, HOME, page, cellX, cellY))
+            insertActive(homeApp(appItem, HOME, page, cellX, cellY))
             true
         }
 
@@ -131,7 +159,7 @@ class HomeLayoutRepository @Inject constructor(
                 firstFreeCell(items, columns, rows)
             }
             if (!isShownPage(p)) return@withTransaction PlaceResult.HomeFull
-            dao.insert(homeApp(appItem, HOME, p, x, y))
+            insertActive(homeApp(appItem, HOME, p, x, y))
             PlaceResult.Placed
         }
 
@@ -156,7 +184,7 @@ class HomeLayoutRepository @Inject constructor(
             if (present) return@withTransaction true
             val (page, x, y) = firstFreeCell(dao.getContainer(HOME), columns, rows)
             if (!isShownPage(page)) return@withTransaction false
-            dao.insert(
+            insertActive(
                 HomeItemEntity(
                     containerId = HOME,
                     packageName = packageName,
@@ -189,7 +217,7 @@ class HomeLayoutRepository @Inject constructor(
             firstFreeCell(items, columns, rows)
         }
         if (!isShownPage(p)) return@withTransaction null
-        dao.insert(
+        insertActive(
             HomeItemEntity(
                 containerId = HOME,
                 packageName = packageName,
@@ -223,7 +251,7 @@ class HomeLayoutRepository @Inject constructor(
             firstFreeRect(items, columns, sx, sy, rows)
         }
         if (!isShownPage(p)) return@withTransaction null
-        dao.insert(
+        insertActive(
             HomeItemEntity(
                 containerId = HOME,
                 page = p, cellX = x, cellY = y,
@@ -295,12 +323,12 @@ class HomeLayoutRepository @Inject constructor(
      *  row is made. Returns the folder's id. */
     private suspend fun foldApps(target: HomeItemEntity, droppedRow: HomeItemEntity?, dropped: AppItem, name: String): Long {
         // Folder starts off-grid so it doesn't clash with the target cell it's about to take over.
-        val folderId = dao.insert(
+        val folderId = insertActive(
             HomeItemEntity(containerId = target.containerId, folderName = name, page = -1, cellX = -1, cellY = -1),
         )
         dao.moveById(target.id, folderId, 0, 0, 0)
         if (droppedRow != null) dao.moveById(droppedRow.id, folderId, 0, 1, 0)
-        else dao.insert(homeApp(dropped, folderId, 0, 1, 0))
+        else insertActive(homeApp(dropped, folderId, 0, 1, 0))
         dao.moveById(folderId, target.containerId, target.page, target.cellX, target.cellY)
         return folderId
     }
@@ -315,7 +343,7 @@ class HomeLayoutRepository @Inject constructor(
         }
         val order = dao.childCount(folderId)
         if (droppedRow != null) dao.moveById(droppedRow.id, folderId, 0, order, 0)
-        else dao.insert(homeApp(dropped, folderId, 0, order, 0))
+        else insertActive(homeApp(dropped, folderId, 0, order, 0))
     }
 
     /** Moves [appItem] off the home screen into [folderId], appended after its current children.
@@ -463,7 +491,7 @@ class HomeLayoutRepository @Inject constructor(
     suspend fun addToDock(app: AppItem): Boolean = db.withTransaction {
         if (dockRow(app) != null) return@withTransaction false
         // Parked first, numbered after: the row count is not a free slot while the dock has a gap.
-        val id = dao.insert(homeApp(app, DOCK, 0, PARKED_SLOT, 0))
+        val id = insertActive(homeApp(app, DOCK, 0, PARKED_SLOT, 0))
         writeDockOrder(dao.getContainerOrdered(DOCK).map { it.id }.filter { it != id } + id)
         true
     }
@@ -477,7 +505,7 @@ class HomeLayoutRepository @Inject constructor(
      */
     suspend fun addToDockAt(app: AppItem, index: Int, shownKeys: Set<String>? = null) = db.withTransaction {
         val existing = dockRow(app)
-        val row = existing ?: dao.getById(dao.insert(homeApp(app, DOCK, 0, PARKED_SLOT, 0)))!!
+        val row = existing ?: dao.getById(insertActive(homeApp(app, DOCK, 0, PARKED_SLOT, 0)))!!
         insertDockRow(row, index, shownKeys)
     }
 
@@ -506,7 +534,7 @@ class HomeLayoutRepository @Inject constructor(
     /** The first-run default dock: [apps] in order, only while the dock is still empty. */
     suspend fun seedDock(apps: List<AppItem>) = db.withTransaction {
         if (dao.getContainer(DOCK).isNotEmpty()) return@withTransaction
-        apps.distinctBy { it.key }.forEachIndexed { i, app -> dao.insert(homeApp(app, DOCK, 0, i, 0)) }
+        apps.distinctBy { it.key }.forEachIndexed { i, app -> insertActive(homeApp(app, DOCK, 0, i, 0)) }
     }
 
     /**
@@ -521,7 +549,7 @@ class HomeLayoutRepository @Inject constructor(
             val parts = key.split('/')
             val serial = parts.getOrNull(2)?.toLongOrNull() ?: continue
             if (parts.size != 3 || parts[0].isEmpty() || key in present) continue
-            dao.insert(
+            insertActive(
                 HomeItemEntity(
                     containerId = DOCK, packageName = parts[0], className = parts[1], userSerial = serial,
                     page = 0, cellX = slot++, cellY = 0,
@@ -553,7 +581,7 @@ class HomeLayoutRepository @Inject constructor(
         val row = when {
             existing != null -> { home?.let { dao.deleteById(it.id) }; existing }
             home != null -> { dao.moveById(home.id, DOCK, 0, PARKED_SLOT, 0); dao.getById(home.id)!! }
-            else -> dao.getById(dao.insert(homeApp(app, DOCK, 0, PARKED_SLOT, 0)))!!
+            else -> dao.getById(insertActive(homeApp(app, DOCK, 0, PARKED_SLOT, 0)))!!
         }
         insertDockRow(row, index, shownKeys)
     }
@@ -798,7 +826,7 @@ class HomeLayoutRepository @Inject constructor(
         var temp = -1
         for (id in plan.keys) { dao.moveById(id, HOME, temp, temp, temp); temp-- }
         for ((id, pos) in plan) dao.moveById(id, HOME, p.page, pos.first, pos.second)
-        dao.insert(HomeItemEntity(
+        insertActive(HomeItemEntity(
             containerId = HOME, page = p.page, cellX = p.cellX, cellY = p.cellY,
             spanX = p.spanX, spanY = p.spanY, appWidgetId = appWidgetId,
             widgetProvider = provider, builtinType = builtinType,
@@ -868,7 +896,7 @@ class HomeLayoutRepository @Inject constructor(
             if (!isShownPage(placement.page)) return@withTransaction false
             applyPush(placement)
             val (page, x, y) = Triple(placement.page, placement.cellX, placement.cellY)
-            dao.insert(
+            insertActive(
                 HomeItemEntity(
                     containerId = HOME,
                     page = page, cellX = x, cellY = y,
@@ -891,9 +919,11 @@ class HomeLayoutRepository @Inject constructor(
      */
     suspend fun unbindStaleWidgets(validIds: Set<Int>) {
         db.withTransaction {
-            dao.getContainer(HOME).forEach { row ->
+            // AppWidgetHost IDs are device-wide, but rows are partitioned by AK workspace.
+            // Reconcile every partition so an inactive profile cannot keep a dead host ID.
+            dao.allWorkspaceWidgetRows().forEach { row ->
                 val id = row.appWidgetId
-                if (id != null && id !in validIds) dao.clearWidgetId(row.id)
+                if (id != null && id !in validIds) dao.clearWidgetIdInAnyWorkspace(row.id)
             }
         }
     }
@@ -909,6 +939,9 @@ class HomeLayoutRepository @Inject constructor(
 
     /** Device-local ids of all bound widgets, for reconciling leftover ids in the AppWidgetHost. */
     suspend fun boundWidgetIds(): Set<Int> = dao.boundWidgetIds().toSet()
+
+    /** Every virtual workspace's widget IDs, used by the host cleanup sweep. */
+    suspend fun allWorkspaceBoundWidgetIds(): Set<Int> = dao.allWorkspaceBoundWidgetIds().toSet()
 
     /** Atomically sets a widget row's full grid bounds (used by both move and resize). If the target
      *  rect is occupied, the overlapping items are pushed aside to free cells on the same page

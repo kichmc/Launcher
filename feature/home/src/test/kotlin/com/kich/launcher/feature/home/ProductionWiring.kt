@@ -130,7 +130,7 @@ internal class ProductionWiring(private val context: Application, testScope: Tes
         settingsRepository.setOnboardingDone()
         return HomeViewModel(
             context, settingsRepository, appRepository, homeLayoutRepository, NotificationBadgeRepository(), SignalMonitor(context),
-            CustomIconStore(settingsRepository, CustomIconSource(context, IconPackRepository(context))),
+            CustomIconStore(settingsRepository, CustomIconSource(context, IconPackRepository(context)), context),
         )
     }
 

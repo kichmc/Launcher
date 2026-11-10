@@ -142,7 +142,11 @@ class DrawerWallpaperStore internal constructor(
 ) {
     @Inject constructor(@ApplicationContext context: Context) : this(context, Dispatchers.IO)
 
-    private val dir = File(context.filesDir, "drawer_wallpaper")
+    private val rootDir = File(context.filesDir, "drawer_wallpaper")
+    private fun activeProfileId(): String = context.getSharedPreferences("ak_workspace_profiles", Context.MODE_PRIVATE)
+        .getString("active", "user1")?.takeIf { it.matches(Regex("[A-Za-z0-9_-]{1,40}")) } ?: "user1"
+    // Keep the legacy User 1 directory in place so existing wallpaper files survive the upgrade.
+    private fun profileDir(): File = if (activeProfileId() == "user1") rootDir else File(rootDir, activeProfileId())
     private val _current = MutableStateFlow(load())
 
     /** The ticket of the user's latest pick or removal, taken the moment it is asked for. A pick publishes only while
@@ -155,6 +159,12 @@ class DrawerWallpaperStore internal constructor(
 
     /** The picture, or null when none is set. */
     val current: StateFlow<DrawerWallpaper?> = _current
+
+    /** Reloads the drawer picture after the active AK virtual workspace changes. */
+    fun reloadForActiveProfile() {
+        latest.incrementAndGet()
+        synchronized(publishLock) { _current.value = load() }
+    }
 
     /** Saves the picture at [uri]; false when it cannot be read or saved, or a later pick or removal overtook it. */
     suspend fun import(uri: Uri): Boolean {
@@ -180,7 +190,7 @@ class DrawerWallpaperStore internal constructor(
         withContext(io) {
             synchronized(publishLock) {
                 if (ticket != latest.get()) return@withContext
-                File(dir, LEGACY_LUMINANCE_FILE).delete()
+                File(profileDir(), LEGACY_LUMINANCE_FILE).delete()
                 _current.value = null
                 publishedPictures().forEach { it.delete() }
             }
@@ -198,6 +208,7 @@ class DrawerWallpaperStore internal constructor(
      * took the launcher down).
      */
     private fun save(picture: Bitmap, ticket: Int): Boolean {
+        val dir = profileDir()
         dir.mkdirs()
         val part = File(dir, "${UUID.randomUUID()}$PART_SUFFIX")
         val lightness = runCatching {
@@ -233,6 +244,7 @@ class DrawerWallpaperStore internal constructor(
      *  drawer's crop of the picture looks like) comes from a small decode of the file; failing that, the whole
      *  picture's lightness stands for every crop. */
     private fun load(): DrawerWallpaper? {
+        val dir = profileDir()
         val files = dir.listFiles()?.filter { it.isFile } ?: return null
         files.filter { it.name.endsWith(PART_SUFFIX) }.forEach { it.delete() }
         val pictures = files.filter { it.extension == "jpg" }.sortedByDescending { it.lastModified() }
@@ -257,7 +269,7 @@ class DrawerWallpaperStore internal constructor(
     }
 
     /** Every published picture on disk: the current one and, after a crash, the one it replaced. */
-    private fun publishedPictures(): List<File> = dir.listFiles()?.filter { it.isFile && it.extension == "jpg" }.orEmpty()
+    private fun publishedPictures(): List<File> = profileDir().listFiles()?.filter { it.isFile && it.extension == "jpg" }.orEmpty()
 
     /** The picture at [uri] upright (ImageDecoder reads the EXIF orientation) and within
      *  [DRAWER_WALLPAPER_MAX_SIDE]; BitmapFactory where ImageDecoder cannot decode. */

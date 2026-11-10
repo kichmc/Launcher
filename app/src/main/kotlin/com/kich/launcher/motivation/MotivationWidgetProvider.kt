@@ -49,6 +49,7 @@ class MotivationWidgetProvider : AppWidgetProvider() {
                 store.toggleFavorite(store.current())
                 updateAll(context)
             }
+            ACTION_PROFILE_CHANGED -> updateAll(context)
             else -> super.onReceive(context, intent)
         }
     }
@@ -56,6 +57,7 @@ class MotivationWidgetProvider : AppWidgetProvider() {
     companion object {
         const val ACTION_REFRESH = "com.kich.launcher.motivation.REFRESH"
         const val ACTION_FAVORITE = "com.kich.launcher.motivation.FAVORITE"
+        const val ACTION_PROFILE_CHANGED = "com.kich.launcher.motivation.PROFILE_CHANGED"
 
         /** Below this height (dp) the one-row layout is used. */
         private const val COMPACT_BELOW_DP = 120

@@ -330,7 +330,9 @@ fun HomeScreen(
         then: suspend (Set<Int>) -> Unit = {},
     ): Set<Int>? = PendingWidgetIds.shared.sweepHostIds(
         hostIds = { runCatching { host.appWidgetIds }.getOrNull() },
-        rowIds = { viewModel.boundWidgetIds() },
+        // Keep widgets belonging to inactive AK workspaces; only delete ids absent from every
+        // workspace, not merely absent from the currently visible layout.
+        rowIds = { viewModel.allWorkspaceBoundWidgetIds() },
         keep = { setOfNotNull(pendingWidget?.appWidgetId) },
         delete = { id -> runCatching { host.deleteAppWidgetId(id) } },
         then = then,
