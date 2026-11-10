@@ -39,7 +39,7 @@ class SettingsViewModel @Inject constructor(
     private val homeLayoutRepository: HomeLayoutRepository,
     private val iconPackRepository: IconPackRepository,
     private val customIcons: CustomIconStore,
-    appRepository: AppRepository,
+    private val appRepository: AppRepository,
     private val drawerWallpaper: DrawerWallpaperStore,
 ) : ViewModel() {
 
@@ -47,6 +47,7 @@ class SettingsViewModel @Inject constructor(
 
     private val profilePrefs by lazy { appContext.getSharedPreferences("ak_workspace_profiles", Context.MODE_PRIVATE) }
     private val _profiles = MutableStateFlow<List<AkWorkspaceProfile>>(emptyList())
+
     val profiles = _profiles.asStateFlow()
     private val _activeProfileName = MutableStateFlow("User 1")
     val activeProfileName = _activeProfileName.asStateFlow()
@@ -77,6 +78,17 @@ class SettingsViewModel @Inject constructor(
         val array = JSONArray()
         list.forEach { array.put(JSONObject().put("id", it.id).put("name", it.name)) }
         profilePrefs.edit().putString("profiles", array.toString()).apply()
+    }
+
+    /** Adds every currently visible app to the home grid, preserving existing entries. */
+    fun addAllVisibleAppsToHome(hiddenKeys: Set<String>) {
+        viewModelScope.launch {
+            val current = repository.settings.first()
+            val visible = appRepository.apps.first().filterNot { it.key in hiddenKeys }
+            visible.forEach { app ->
+                homeLayoutRepository.addToHome(app, current.homeColumns, current.homeRows)
+            }
+        }
     }
 
     fun createAkProfile(name: String) {

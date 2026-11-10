@@ -41,6 +41,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Slider
@@ -129,6 +130,7 @@ fun SettingsScreen(
     // Saveable: the activity is recreated on rotation and on a theme switch, and that can happen
     // under the Backup page's file picker — a page that forgot it was open never received the
     // picker's result (an empty file in Downloads, no message).
+    var settingsSearch by rememberSaveable { mutableStateOf("") }
     var showHiddenManager by rememberSaveable { mutableStateOf(false) }
     var showFolderManager by rememberSaveable { mutableStateOf(false) }
     var showLeftSwipePicker by rememberSaveable { mutableStateOf(false) }
@@ -226,6 +228,30 @@ fun SettingsScreen(
                     letterSpacing = (-0.3).sp,
                     modifier = Modifier.padding(start = 6.dp, top = 10.dp, bottom = 6.dp),
                 )
+
+                OutlinedTextField(
+                    value = settingsSearch,
+                    onValueChange = { settingsSearch = it },
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                    singleLine = true,
+                    label = { Text("Search settings") },
+                    placeholder = { Text("Wallpaper, icons, gestures, grid…") },
+                )
+                if (settingsSearch.isNotBlank()) {
+                    val matches = remember(settingsSearch) {
+                        listOf("Gestures", "Dock", "Home screen", "App drawer", "Appearance", "Wallpaper", "Icons", "Folders", "Hidden apps", "Widgets", "AK Workspaces", "Backup")
+                            .filter { it.contains(settingsSearch.trim(), ignoreCase = true) }
+                    }
+                    if (matches.isNotEmpty()) {
+                        Text("Matching sections: ${matches.joinToString(" • ")}", color = palette.text.copy(alpha = 0.75f), fontSize = 13.sp, modifier = Modifier.padding(bottom = 8.dp))
+                    } else {
+                        Text("No matching settings section", color = palette.text.copy(alpha = 0.65f), fontSize = 13.sp, modifier = Modifier.padding(bottom = 8.dp))
+                    }
+                }
+                ExpressiveActionRow(
+                    label = "Add all visible apps to Home screen",
+                    description = "Adds apps shown in the app drawer. Hidden apps are skipped; existing icons are not duplicated.",
+                ) { viewModel.addAllVisibleAppsToHome(hiddenKeys) }
 
                 ExpressiveActionRow(
                     label = stringResource(R.string.settings_set_default),
