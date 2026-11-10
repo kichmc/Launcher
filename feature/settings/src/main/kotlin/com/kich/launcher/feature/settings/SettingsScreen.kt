@@ -111,6 +111,7 @@ import com.kich.launcher.ui.expressive.LocalExpressivePalette
 fun SettingsScreen(
     modifier: Modifier = Modifier,
     viewModel: SettingsViewModel = hiltViewModel(),
+    openAkProfiles: Boolean = false,
 ) {
     val s by viewModel.settings.collectAsStateWithLifecycle()
     val akProfiles by viewModel.profiles.collectAsStateWithLifecycle()
@@ -131,7 +132,7 @@ fun SettingsScreen(
     var showHiddenManager by rememberSaveable { mutableStateOf(false) }
     var showFolderManager by rememberSaveable { mutableStateOf(false) }
     var showLeftSwipePicker by rememberSaveable { mutableStateOf(false) }
-    var showAkProfiles by rememberSaveable { mutableStateOf(false) }
+    var showAkProfiles by rememberSaveable { mutableStateOf(openAkProfiles) }
     var showWeatherAppPicker by rememberSaveable { mutableStateOf(false) }
     var showPageSpeedPicker by rememberSaveable { mutableStateOf(false) }
     var showIconPackPicker by rememberSaveable { mutableStateOf(false) }
