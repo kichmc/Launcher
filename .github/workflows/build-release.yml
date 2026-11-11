@@ -18,9 +18,23 @@ jobs:
           distribution: temurin
           java-version: 21
       - uses: gradle/actions/setup-gradle@v4
-      - name: Signing config
+      - name: Configure release signing from GitHub Secrets
+        env:
+          AK_SIGNING_KEYSTORE_BASE64: ${{ secrets.AK_SIGNING_KEYSTORE_BASE64 }}
+          AK_SIGNING_STORE_PASSWORD: ${{ secrets.AK_SIGNING_STORE_PASSWORD }}
+          AK_SIGNING_KEY_ALIAS: ${{ secrets.AK_SIGNING_KEY_ALIAS }}
+          AK_SIGNING_KEY_PASSWORD: ${{ secrets.AK_SIGNING_KEY_PASSWORD }}
         run: |
-          printf 'storeFile=kich-signing.p12\nstorePassword=kichlauncher\nkeyAlias=kich\nkeyPassword=kichlauncher\n' > keystore.properties
+          set -euo pipefail
+          for name in AK_SIGNING_KEYSTORE_BASE64 AK_SIGNING_STORE_PASSWORD AK_SIGNING_KEY_ALIAS AK_SIGNING_KEY_PASSWORD; do
+            if [ -z "${!name}" ]; then
+              echo "::error::Missing GitHub Actions secret: ${name}"
+              exit 1
+            fi
+          done
+          printf '%s' "$AK_SIGNING_KEYSTORE_BASE64" | base64 --decode > ak-signing.p12
+          printf 'storeFile=ak-signing.p12\nstorePassword=%s\nkeyAlias=%s\nkeyPassword=%s\n' \
+            "$AK_SIGNING_STORE_PASSWORD" "$AK_SIGNING_KEY_ALIAS" "$AK_SIGNING_KEY_PASSWORD" > keystore.properties
       - name: Build release APK
         run: |
           chmod +x ./gradlew

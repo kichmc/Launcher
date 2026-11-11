@@ -29,7 +29,7 @@ class AppLabelMigrationTest {
         val file = File(context.cacheDir, "migration-test.db")
         file.delete()
         SQLiteDatabase.openOrCreateDatabase(file, null).use { db ->
-            val schema = JSONObject(File("schemas/com.kich.launcher.data.local.LauncherDatabase/7.json").readText())
+            val schema = JSONObject(File("schemas/org.arkikeskus.launcher.data.local.LauncherDatabase/7.json").readText())
             val entity = schema.getJSONObject("database").getJSONArray("entities").getJSONObject(0)
             db.execSQL(entity.getString("createSql").replace("\${TABLE_NAME}", entity.getString("tableName")))
             db.execSQL(entity.getJSONArray("indices").getJSONObject(0).getString("createSql").replace("\${TABLE_NAME}", entity.getString("tableName")))

@@ -19,3 +19,12 @@
 - No APK build, emulator test, or physical-device test is claimed.
 - Confirm workspace isolation on-device by placing different apps/widgets in two AK workspaces,
   switching between them, and checking that each layout remains unchanged.
+
+## Additional audit fixes in this pass
+
+- Corrected `AppLabelMigrationTest` to load the checked-in version-7 Room schema from its actual
+  historical package directory (`org.arkikeskus...`). The test previously pointed at a
+  `com.kich...` directory that is not present in this archive.
+- Removed the PKCS#12 signing keystore from the distributable source archive, added PKCS#12/private
+  key extensions to `.gitignore`, and changed the release workflow to read signing material from
+  GitHub Actions secrets instead of hard-coded credentials.

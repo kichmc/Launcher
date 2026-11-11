@@ -40,3 +40,8 @@ lawnchair-src/
 
 # Design reference drops (local only — extracted/applied, not committed as binaries)
 Android launcherin teeman asetukset.zip
+
+# PKCS#12 signing keys and private key material — never commit
+*.p12
+*.pem
+*.pk8
