@@ -46,6 +46,13 @@ internal fun LockScreenSettingsContent(viewModel: SettingsViewModel, profileName
         modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
         style = androidx.compose.material3.MaterialTheme.typography.bodySmall,
     )
+    var returnToFirst by remember { mutableStateOf(viewModel.lockManager.returnToFirstOnScreenOff) }
+    SwitchRow(
+        label = "Return to User 1 when screen turns off",
+        description = "Applies to all workspaces. User 1’s own lock (if any) then appears.",
+        checked = returnToFirst,
+        onCheckedChange = { returnToFirst = it; viewModel.lockManager.returnToFirstOnScreenOff = it },
+    )
     if (!state.lockEnabled) {
         ExpressiveActionRow("Set AK PIN", "Turn on the lock screen for this profile.", onClick = { dialog = LockDialog.SetPin })
     } else {

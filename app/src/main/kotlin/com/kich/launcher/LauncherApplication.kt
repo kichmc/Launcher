@@ -44,7 +44,7 @@ class LauncherApplication : Application(), SingletonImageLoader.Factory {
         // the Application — no service, nothing running while the screen is on.
         registerReceiver(object : android.content.BroadcastReceiver() {
             override fun onReceive(context: android.content.Context, intent: android.content.Intent) {
-                com.kich.launcher.data.lock.ProfileLockManager.get(context).lockActive()
+                com.kich.launcher.data.lock.ProfileLockManager.get(context).onScreenOff()
             }
         }, android.content.IntentFilter(android.content.Intent.ACTION_SCREEN_OFF))
         // Gallery pictures an earlier run left unused (see CustomIconStore.deleteUnusedPictures).

@@ -22,6 +22,10 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import com.kich.launcher.ui.LauncherAppTheme
 import com.kich.launcher.data.lock.ProfileLockManager
 import com.kich.launcher.lock.LockScreen
+import androidx.activity.viewModels
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.launch
+import com.kich.launcher.feature.settings.SettingsViewModel
 import androidx.compose.animation.togetherWith
 import com.kich.launcher.feature.home.APPWIDGET_HOST_ID
 import com.kich.launcher.feature.home.LocalAppWidgetHost
@@ -68,11 +72,20 @@ class LauncherActivity : ComponentActivity() {
      *  process starts locked when it must — never from anything held only in this instance. */
     private val lockManager by lazy { ProfileLockManager.get(this) }
 
+    /** Owns the one serialised profile switch. Lazy: only created when a switch is actually needed. */
+    private val profileSwitcher: SettingsViewModel by viewModels()
+
+    /** Screen-off "back to User 1": runs the normal profile switch, so nothing is bypassed. */
+    private fun returnToFirstProfileIfRequested() {
+        if (lockManager.consumePendingReturn()) profileSwitcher.activateAkProfile(ProfileLockManager.FIRST_PROFILE)
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         installSplashScreen()
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         keepHomeOnBack()
+        lifecycleScope.launch { lockManager.returnToFirstRequests.collect { returnToFirstProfileIfRequested() } }
         setContent {
             LauncherAppTheme {
                 // Icon re-fetch epochs above EVERY icon surface (home, dock, drawer, folder sheets):
@@ -167,6 +180,7 @@ class LauncherActivity : ComponentActivity() {
     override fun onStart() {
         super.onStart()
         lockManager.refresh()
+        returnToFirstProfileIfRequested()
         // A launcher is the device HOME — a host hiccup must never crash it.
         runCatching { appWidgetHost.startListening() }
     }
