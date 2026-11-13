@@ -73,6 +73,8 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.KichLauncher.Starting">
 
+        <!-- Not excluded from recents and its state is kept: the launcher used to vanish from Recents and
+             lose its state whenever the system reclaimed it. -->
         <!-- Portrait-locked like most launchers: the home grid's fixed 6 rows don't fit a phone in
              landscape (rows/widgets would overlap). Android 12L+ ignores the lock on large screens
              (tablets, unfolded foldables), which is the desired behavior there. -->
@@ -80,8 +82,6 @@
             android:name=".LauncherActivity"
             android:exported="true"
             android:launchMode="singleTask"
-            android:stateNotNeeded="true"
-            android:excludeFromRecents="true"
             android:taskAffinity=""
             android:screenOrientation="portrait"
             android:configChanges="keyboard|keyboardHidden|navigation|orientation|screenSize|screenLayout|smallestScreenSize|density|uiMode"

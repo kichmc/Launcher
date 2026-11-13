@@ -717,7 +717,7 @@ private fun AppDrawerContent(
                         ) { page ->
                             val start = if (page == 0) 0 else firstPageCapacity + (page - 1) * pageCapacity
                             val count = if (page == 0) firstPageCapacity else pageCapacity
-                            val pageEntries = entries.drop(start).take(count)
+                            val pageEntries = remember(entries, start, count) { entries.drop(start).take(count) }
                             val pageGridState = rememberLazyGridState()
                             LazyVerticalGrid(
                                 columns = GridCells.Fixed(columns),
@@ -886,15 +886,16 @@ private fun DrawerFolderTile(
     badgeShowCount: Boolean = true,
     badgeScale: Float = 1f,
 ) {
-    var bounds by remember(folder.id) { mutableStateOf(Rect.Zero) }
+    // Plain reference, not state: positioned callbacks fire every frame of a page swipe.
+    val coords = remember(folder.id) { arrayOfNulls<androidx.compose.ui.layout.LayoutCoordinates>(1) }
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .onGloballyPositioned { bounds = it.boundsInRoot() }
+            .onGloballyPositioned { coords[0] = it }
             // combinedClickable ticks the long-press haptic itself (as an app's does). The label is
             // what TalkBack reads for the hold: the editor has no other way in.
             .combinedClickable(
-                onClick = { onClick(bounds) },
+                onClick = { onClick(coords[0]?.takeIf { it.isAttached }?.boundsInRoot() ?: Rect.Zero) },
                 onLongClickLabel = stringResource(R.string.folder_edit),
                 onLongClick = onLongClick,
             )
@@ -1292,7 +1293,7 @@ internal fun FrequentAppsCard(
             )
             Row(modifier = Modifier.fillMaxWidth()) {
                 apps.forEach { app ->
-                    var bounds by remember(app.key) { mutableStateOf(Rect.Zero) }
+                    val coords = remember(app.key) { arrayOfNulls<androidx.compose.ui.layout.LayoutCoordinates>(1) }
                     // On the card's own solid surface: the palette's text, not the see-through drawer's.
                     AppIcon(
                         appItem = app,
@@ -1304,10 +1305,10 @@ internal fun FrequentAppsCard(
                         badgeScale = badgeScale,
                         modifier = Modifier
                             .weight(1f)
-                            .onGloballyPositioned { bounds = it.boundsInRoot() }
+                            .onGloballyPositioned { coords[0] = it }
                             .combinedClickable(
                                 onClick = { onAppClick(app) },
-                                onLongClick = { onAppLongClick(app, bounds) },
+                                onLongClick = { onAppLongClick(app, coords[0]?.takeIf { it.isAttached }?.boundsInRoot() ?: Rect.Zero) },
                             )
                             .padding(vertical = 4.dp, horizontal = 2.dp),
                     )
@@ -1371,8 +1372,13 @@ private fun DrawerAppCell(
     val currentApp by rememberUpdatedState(app)
     // [bounds] anchors the popup and is clipped by the grid; [origin] is the cell's real top-left,
     // which a cell half scrolled under the grid's top edge still needs for the finger's position.
-    var bounds by remember { mutableStateOf(Rect.Zero) }
-    var origin by remember { mutableStateOf(Offset.Zero) }
+    // Held as a plain reference, NOT state: onGloballyPositioned fires for every cell on every frame
+    // of a page swipe, and writing two snapshot states per cell per frame (about ninety cells with the
+    // neighbouring pages) made the horizontal paging stutter. The numbers are only needed when a
+    // gesture starts, so they are read from the coordinates then.
+    val coords = remember { arrayOfNulls<androidx.compose.ui.layout.LayoutCoordinates>(1) }
+    fun boundsNow(): Rect = coords[0]?.takeIf { it.isAttached }?.boundsInRoot() ?: Rect.Zero
+    fun originNow(): Offset = coords[0]?.takeIf { it.isAttached }?.positionInRoot() ?: Offset.Zero
     AppIcon(
         appItem = app,
         labelColor = drawerLabelColor(LocalDrawerLabelColor.current, MaterialTheme.colorScheme.onSurface),
@@ -1382,7 +1388,7 @@ private fun DrawerAppCell(
         badgeShowCount = badgeShowCount,
         badgeScale = badgeScale,
         modifier = Modifier
-            .onGloballyPositioned { bounds = it.boundsInRoot(); origin = it.positionInRoot() }
+            .onGloballyPositioned { coords[0] = it }
             // One unified gesture (like Workspace/Dock) but non-consuming until the
             // long-press fires, so a quick drag still scrolls the grid: quick tap
             // launches; a still long-press lifts → drag out to home/dock, or with no
@@ -1446,13 +1452,13 @@ private fun DrawerAppCell(
                     // the drag, so its local coordinate space stays put and this stays
                     // accurate.
                     val token = Any()
-                    if (!dragController.start(currentApp, DragSource.Drawer, origin + holdPos, token)) {
+                    if (!dragController.start(currentApp, DragSource.Drawer, originNow() + holdPos, token)) {
                         return@awaitEachGesture
                     }
                     haptics.performHapticFeedback(HapticFeedbackType.LongPress)
                     // The menu opens now, by the icon, under the still-held finger (issue #12);
                     // pulling the icon on closes it (DismissWhenDragMoves) and the drag goes on.
-                    onAppLongClick(currentApp, bounds)
+                    onAppLongClick(currentApp, boundsNow())
                     val dragStartPx = IconPress.DragStartThreshold.toPx()
                     try {
                         val completed = drag(down.id) { change ->
@@ -1468,7 +1474,7 @@ private fun DrawerAppCell(
                                 onDragOutStart()
                             }
                             if (dragController.moving) {
-                                dragController.update(origin + change.position)
+                                dragController.update(originNow() + change.position)
                             }
                         }
                         // Nothing on release once HOME cancelled the lift.
