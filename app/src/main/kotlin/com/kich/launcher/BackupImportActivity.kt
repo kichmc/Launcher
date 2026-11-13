@@ -1,5 +1,6 @@
 package com.kich.launcher
 
+import com.kich.launcher.lock.finishIfProfileLocked
 import android.os.Build
 import android.os.Bundle
 import android.view.Window
@@ -24,6 +25,8 @@ import com.kich.launcher.feature.backup.backupImportUri
 class BackupImportActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // A locked profile's home must not be changed by another app's request or an opened file.
+        if (finishIfProfileLocked()) return
         val uri = backupImportUri(this, intent)
         if (uri == null) {
             finish()

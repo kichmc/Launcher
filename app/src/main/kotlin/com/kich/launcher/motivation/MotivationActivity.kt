@@ -1,5 +1,6 @@
 package com.kich.launcher.motivation
 
+import com.kich.launcher.lock.finishIfProfileLocked
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.os.Build
@@ -60,6 +61,11 @@ import dagger.hilt.android.AndroidEntryPoint
 /** Quote settings: interval, manual refresh, favorites and the user's own quotes. */
 @AndroidEntryPoint
 class MotivationActivity : ComponentActivity() {
+    override fun onStart() {
+        super.onStart()
+        finishIfProfileLocked()
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()

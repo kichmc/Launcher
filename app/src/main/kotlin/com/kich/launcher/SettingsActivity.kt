@@ -1,5 +1,6 @@
 package com.kich.launcher
 
+import com.kich.launcher.lock.finishIfProfileLocked
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -10,6 +11,11 @@ import com.kich.launcher.feature.settings.SettingsScreen
 
 @AndroidEntryPoint
 class SettingsActivity : ComponentActivity() {
+    override fun onStart() {
+        super.onStart()
+        finishIfProfileLocked()
+    }
+
     companion object { const val EXTRA_OPEN_AK_PROFILES = "open_ak_profiles" }
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)

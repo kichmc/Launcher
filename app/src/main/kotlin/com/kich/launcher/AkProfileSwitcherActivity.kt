@@ -60,6 +60,7 @@ private fun AkProfileSwitcherScreen(
     val profiles by viewModel.profiles.collectAsStateWithLifecycle()
     var showAdd by remember { mutableStateOf(false) }
     var newName by remember { mutableStateOf("") }
+    var removingId by remember { mutableStateOf<String?>(null) }
 
     Surface(color = MaterialTheme.colorScheme.background) {
         Column(
@@ -93,7 +94,10 @@ private fun AkProfileSwitcherScreen(
                         if (!profile.active) TextButton(onClick = { viewModel.activateAkProfile(profile.id) }) {
                             Text("Switch")
                         }
-                        if (profile.id != "user1") TextButton(onClick = { viewModel.deleteAkProfile(profile.id) }) {
+                        if (profile.id != "user1") TextButton(onClick = {
+                            if (viewModel.lockManager.store.isEnabled(profile.id)) removingId = profile.id
+                            else viewModel.deleteAkProfile(profile.id)
+                        }) {
                             Text("Remove")
                         }
                     }
@@ -110,6 +114,13 @@ private fun AkProfileSwitcherScreen(
         }
     }
 
+    removingId?.let { target ->
+        com.kich.launcher.feature.settings.PinDialog("Enter this workspace’s PIN to remove it", askOld = true, askNew = false, onDismiss = { removingId = null }) { pin, _ ->
+            val done = kotlinx.coroutines.CompletableDeferred<String?>()
+            viewModel.deleteAkProfile(target, pin?.copyOf()) { done.complete(com.kich.launcher.feature.settings.pinMessage(it)) }
+            done.await()
+        }
+    }
     if (showAdd) {
         AlertDialog(
             onDismissRequest = { showAdd = false; newName = "" },

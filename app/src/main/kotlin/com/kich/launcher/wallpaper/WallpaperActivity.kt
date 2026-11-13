@@ -1,5 +1,6 @@
 package com.kich.launcher.wallpaper
 
+import com.kich.launcher.lock.finishIfProfileLocked
 import android.graphics.Bitmap
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -52,6 +53,11 @@ import kotlinx.coroutines.withContext
 /** Standalone wallpaper screen: pick an image from storage, preview it, apply to home, lock or both. */
 @AndroidEntryPoint
 class WallpaperActivity : ComponentActivity() {
+    override fun onStart() {
+        super.onStart()
+        finishIfProfileLocked()
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()

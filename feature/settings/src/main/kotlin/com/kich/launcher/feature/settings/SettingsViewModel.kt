@@ -33,6 +33,9 @@ import com.kich.launcher.data.HomeLayoutRepository
 import com.kich.launcher.data.IconPackInfo
 import com.kich.launcher.data.IconPackRepository
 import com.kich.launcher.data.SettingsRepository
+import com.kich.launcher.data.lock.BiometricUnlock
+import com.kich.launcher.data.lock.PinCheck
+import com.kich.launcher.data.lock.ProfileLockManager
 import com.kich.launcher.model.AppItem
 import com.kich.launcher.model.LauncherSettings
 import com.kich.launcher.data.local.HomeItemEntity
@@ -47,6 +50,7 @@ class SettingsViewModel @Inject constructor(
     private val customIcons: CustomIconStore,
     private val appRepository: AppRepository,
     private val drawerWallpaper: DrawerWallpaperStore,
+    val lockManager: ProfileLockManager,
 ) : ViewModel() {
 
     data class AkWorkspaceProfile(val id: String, val name: String, val active: Boolean = false)
@@ -146,7 +150,7 @@ class SettingsViewModel @Inject constructor(
                     val updated = _profiles.value.map { it.copy(active = false) } +
                         AkWorkspaceProfile(id, clean, true)
                     saveProfileList(updated)
-                    check(withContext(Dispatchers.IO) { profilePrefs.edit().putString("active", id).commit() })
+                    check(withContext(Dispatchers.IO) { ProfileLockManager.markerClearedEditor(profilePrefs.edit().putString("active", id)).commit() })
                     drawerWallpaper.reloadForActiveProfile()
                     refreshMotivationWidget()
                     refreshProfiles()
@@ -222,7 +226,7 @@ class SettingsViewModel @Inject constructor(
                 homeLayoutRepository.cloneLayoutIntoActiveWorkspace(initialLayout)
                 check(profilePrefs.edit().putBoolean(partitionKey, true).commit())
             }
-            check(withContext(Dispatchers.IO) { profilePrefs.edit().putString("active", id).commit() })
+            check(withContext(Dispatchers.IO) { ProfileLockManager.markerClearedEditor(profilePrefs.edit().putString("active", id)).commit() })
         } catch (_: Exception) {
             // Restore the previous Room partition before restoring its layout.
             runCatching { homeLayoutRepository.setActiveWorkspace(oldId) }
@@ -296,9 +300,19 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
-    fun deleteAkProfile(id: String) {
+    /**
+     * Deleting a profile destroys its data, so a profile with a lock needs that profile's own PIN
+     * ([pin]) — from Settings, the Quick Settings switcher or anywhere else. [onResult] gets the
+     * verdict; nothing is deleted unless it is [PinCheck.Success] (or the profile has no lock).
+     */
+    fun deleteAkProfile(id: String, pin: CharArray? = null, onResult: (PinCheck) -> Unit = {}) {
         if (id == "user1") return
         viewModelScope.launch {
+            if (lockManager.store.isEnabled(id)) {
+                val check = if (pin == null) PinCheck.NotConfigured
+                else withContext(Dispatchers.Default) { lockManager.store.verifyPin(id, pin) }
+                if (check != PinCheck.Success) { onResult(check); return@launch }
+            }
             profileMutex.withLock {
                 if (_profiles.value.none { it.id == id }) return@withLock
                 // Restore User 1 while the deleted profile is still the recorded active profile.
@@ -318,10 +332,46 @@ class SettingsViewModel @Inject constructor(
                 appContext.getSharedPreferences("kich_wallpaper", Context.MODE_PRIVATE).edit()
                     .remove("target_$id").remove("applied_at_$id").apply()
                 appContext.getSharedPreferences("kich_motivation_$id", Context.MODE_PRIVATE).edit().clear().apply()
+                lockManager.store.delete(id)
+                BiometricUnlock.deleteKey(id)
                 saveProfileList(remaining)
                 refreshProfiles()
+                onResult(PinCheck.Success)
             }
         }
+    }
+
+    // --- Lock screen (acts only on the ACTIVE profile; ids are never taken from the UI) ---
+
+    val lockState = lockManager.state
+
+    suspend fun setLockPin(pin: CharArray): Boolean = withContext(Dispatchers.Default) {
+        val id = lockManager.activeProfileId()
+        val ok = lockManager.store.setPin(id, pin)
+        // Setting a PIN on the profile you are using must not lock you out of it right now.
+        if (ok) lockManager.markUnlocked(id) else lockManager.refresh()
+        ok
+    }
+
+    suspend fun changeLockPin(old: CharArray, new: CharArray): PinCheck = withContext(Dispatchers.Default) {
+        lockManager.store.changePin(lockManager.activeProfileId(), old, new).also { lockManager.refresh() }
+    }
+
+    suspend fun disableLock(pin: CharArray): PinCheck = withContext(Dispatchers.Default) {
+        val id = lockManager.activeProfileId()
+        lockManager.store.disable(id, pin).also {
+            if (it == PinCheck.Success) BiometricUnlock.deleteKey(id)
+            lockManager.refresh()
+        }
+    }
+
+    fun storeBiometric(iv: ByteArray, blob: ByteArray) {
+        lockManager.store.setBiometric(lockManager.activeProfileId(), iv, blob); lockManager.refresh()
+    }
+
+    fun disableBiometric() {
+        val id = lockManager.activeProfileId()
+        lockManager.store.clearBiometric(id); BiometricUnlock.deleteKey(id); lockManager.refresh()
     }
 
     /** The user's own picture behind the app drawer, or null (a Telegram request after 0.9.9). */

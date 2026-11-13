@@ -28,6 +28,7 @@ import com.kich.launcher.data.IconChoicesSource
 import com.kich.launcher.data.LauncherAppsSource
 import com.kich.launcher.data.ProfileSystem
 import com.kich.launcher.data.RoomAppLabelStore
+import com.kich.launcher.data.lock.ProfileLockManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -140,4 +141,9 @@ object DataModule {
 
     @Provides
     fun provideProfileSystem(impl: AndroidProfileSystem): ProfileSystem = impl
+
+    @Provides
+    @Singleton
+    fun provideProfileLockManager(@ApplicationContext context: Context): ProfileLockManager =
+        ProfileLockManager.get(context)
 }

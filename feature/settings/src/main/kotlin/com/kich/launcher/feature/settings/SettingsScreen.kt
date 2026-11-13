@@ -136,6 +136,7 @@ fun SettingsScreen(
     var showLeftSwipePicker by rememberSaveable { mutableStateOf(false) }
     var showAkProfiles by rememberSaveable { mutableStateOf(openAkProfiles) }
     var renamingAkProfileId by rememberSaveable { mutableStateOf("") }
+    var deletingAkProfileId by rememberSaveable { mutableStateOf("") }
     var renamingAkProfileName by rememberSaveable { mutableStateOf("") }
     var showWeatherAppPicker by rememberSaveable { mutableStateOf(false) }
     var showPageSpeedPicker by rememberSaveable { mutableStateOf(false) }
@@ -241,7 +242,7 @@ fun SettingsScreen(
                 )
                 if (settingsSearch.isNotBlank()) {
                     val matches = remember(settingsSearch) {
-                        listOf("Gestures", "Dock", "Home screen", "App drawer", "Appearance", "Wallpaper", "Icons", "Folders", "Hidden apps", "Widgets", "AK Workspaces", "Backup")
+                        listOf("Gestures", "Dock", "Home screen", "App drawer", "Appearance", "Wallpaper", "Icons", "Folders", "Hidden apps", "Widgets", "AK Workspaces", "Lock screen", "Backup")
                             .filter { it.contains(settingsSearch.trim(), ignoreCase = true) }
                     }
                     if (matches.isNotEmpty()) {
@@ -643,6 +644,14 @@ fun SettingsScreen(
                 }
 
                 CollapsibleSection(
+                    title = "Lock screen",
+                    collapsed = "lock_screen" in s.collapsedSettingsSections,
+                    onToggle = { viewModel.setSectionCollapsed("lock_screen", it) },
+                ) {
+                    LockScreenSettingsContent(viewModel, activeAkProfileName)
+                }
+
+                CollapsibleSection(
                     title = stringResource(R.string.settings_appearance),
                     collapsed = "appearance" in s.collapsedSettingsSections,
                     onToggle = { viewModel.setSectionCollapsed("appearance", it) },
@@ -849,6 +858,27 @@ fun SettingsScreen(
             )
         }
     }
+    if (deletingAkProfileId.isNotEmpty()) {
+        val target = deletingAkProfileId
+        val needsPin = remember(target) { viewModel.lockManager.store.isEnabled(target) }
+        if (!needsPin) {
+            AlertDialog(
+                onDismissRequest = { deletingAkProfileId = "" },
+                title = { Text("Delete workspace?") },
+                text = { Text("Its layout, settings and wallpaper are removed.") },
+                confirmButton = { TextButton(onClick = { viewModel.deleteAkProfile(target); deletingAkProfileId = "" }) { Text("Delete") } },
+                dismissButton = { TextButton(onClick = { deletingAkProfileId = "" }) { Text("Cancel") } },
+            )
+        } else {
+            PinDialog("Enter this workspace’s PIN to delete it", askOld = true, askNew = false, onDismiss = { deletingAkProfileId = "" }) { pin, _ ->
+                var message: String? = "Could not delete."
+                val done = kotlinx.coroutines.CompletableDeferred<String?>()
+                viewModel.deleteAkProfile(target, pin?.copyOf()) { done.complete(pinMessage(it)) }
+                message = done.await()
+                message
+            }
+        }
+    }
     if (showAkProfiles) {
         AlertDialog(
             onDismissRequest = { showAkProfiles = false },
@@ -870,7 +900,7 @@ fun SettingsScreen(
                                     renamingAkProfileId = profile.id
                                     renamingAkProfileName = profile.name
                                 }) { Text("Rename") }
-                                TextButton(onClick = { viewModel.deleteAkProfile(profile.id) }) { Text("Delete") }
+                                TextButton(onClick = { deletingAkProfileId = profile.id }) { Text("Delete") }
                             }
                         }
                     }

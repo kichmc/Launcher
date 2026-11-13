@@ -1,5 +1,6 @@
 package com.kich.launcher
 
+import com.kich.launcher.lock.finishIfProfileLocked
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -22,6 +23,8 @@ import com.kich.launcher.feature.home.PinRequestScreen
 class PinRequestActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // A locked profile's home must not be changed by another app's request or an opened file.
+        if (finishIfProfileLocked()) return
         val request = systemPinRequest(this, intent)
         if (request == null) {
             finish()

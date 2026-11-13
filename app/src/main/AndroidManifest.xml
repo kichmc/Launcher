@@ -4,6 +4,10 @@
 
     <!-- Open the notification shade with a swipe-down gesture. -->
     <uses-permission android:name="android.permission.SET_WALLPAPER" />
+
+    <!-- AK profile lock: fingerprint through the platform BiometricPrompt. Normal permission. AK never
+         requests a device PIN/credential and never touches Android's own lock screen. -->
+    <uses-permission android:name="android.permission.USE_BIOMETRIC" />
     <uses-permission android:name="android.permission.EXPAND_STATUS_BAR" />
 
     <!-- Optional: contacts in app-drawer search; requested at runtime, gated by a setting. -->

@@ -20,6 +20,9 @@ import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import com.kich.launcher.ui.LauncherAppTheme
+import com.kich.launcher.data.lock.ProfileLockManager
+import com.kich.launcher.lock.LockScreen
+import androidx.compose.animation.togetherWith
 import com.kich.launcher.feature.home.APPWIDGET_HOST_ID
 import com.kich.launcher.feature.home.LocalAppWidgetHost
 import com.kich.launcher.feature.home.LocalOrphanWidgetConfigResult
@@ -61,6 +64,10 @@ class LauncherActivity : ComponentActivity() {
     // collection widget's RemoteViewsAdapter and the host's listener callbacks register against this.
     private val appWidgetHost by lazy { LauncherWidgetHost(this, APPWIDGET_HOST_ID) }
 
+    /** AK's per-profile lock state. Derived from persisted state, so a recreated Activity or a new
+     *  process starts locked when it must — never from anything held only in this instance. */
+    private val lockManager by lazy { ProfileLockManager.get(this) }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         installSplashScreen()
         super.onCreate(savedInstanceState)
@@ -87,12 +94,32 @@ class LauncherActivity : ComponentActivity() {
                     LocalAppLaunchSources provides launchSources,
                     LocalIconChoices provides iconChoices,
                 ) {
+                    val lock by lockManager.state.collectAsStateWithLifecycle()
+                    // No screenshots / recents thumbnail of the PIN pad while locked.
+                    androidx.compose.runtime.DisposableEffect(lock.locked) {
+                        if (lock.locked) window.addFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE)
+                        else window.clearFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE)
+                        onDispose { }
+                    }
                     androidx.compose.foundation.layout.Box(androidx.compose.ui.Modifier.fillMaxSize()) {
                         com.kich.launcher.wallpaper.LauncherWallpaperLayer()
-                        LauncherShell(
-                            homeSignals = homeSignals,
-                            onOpenSettings = { startActivity(Intent(this@LauncherActivity, SettingsActivity::class.java)) },
-                        )
+                        // Locking is instant (home is removed the moment the state says locked);
+                        // only unlocking animates, so nothing underneath stays touchable.
+                        androidx.compose.animation.AnimatedContent(
+                            targetState = lock.locked,
+                            transitionSpec = {
+                                if (!targetState) androidx.compose.animation.fadeIn(androidx.compose.animation.core.tween(320)) togetherWith
+                                    androidx.compose.animation.fadeOut(androidx.compose.animation.core.tween(280))
+                                else androidx.compose.animation.EnterTransition.None togetherWith androidx.compose.animation.ExitTransition.None
+                            },
+                            label = "akLock",
+                        ) { locked ->
+                            if (locked) LockScreen(lock, lockManager)
+                            else LauncherShell(
+                                homeSignals = homeSignals,
+                                onOpenSettings = { startActivity(Intent(this@LauncherActivity, SettingsActivity::class.java)) },
+                            )
+                        }
                     }
                 }
             }
@@ -139,6 +166,7 @@ class LauncherActivity : ComponentActivity() {
 
     override fun onStart() {
         super.onStart()
+        lockManager.refresh()
         // A launcher is the device HOME — a host hiccup must never crash it.
         runCatching { appWidgetHost.startListening() }
     }

@@ -40,6 +40,13 @@ class LauncherApplication : Application(), SingletonImageLoader.Factory {
         // app's request held when a previous process died with the system's bind dialog open.
         PendingWidgetIds.shared.persistIn(SharedPreferencesPendingIdStorage(this))
         lockSounds.start()
+        // AK profile locks re-engage when the screen turns off. A dynamically registered receiver in
+        // the Application — no service, nothing running while the screen is on.
+        registerReceiver(object : android.content.BroadcastReceiver() {
+            override fun onReceive(context: android.content.Context, intent: android.content.Intent) {
+                com.kich.launcher.data.lock.ProfileLockManager.get(context).lockActive()
+            }
+        }, android.content.IntentFilter(android.content.Intent.ACTION_SCREEN_OFF))
         // Gallery pictures an earlier run left unused (see CustomIconStore.deleteUnusedPictures).
         scope.launch(Dispatchers.IO) { runCatching { customIcons.deleteUnusedPictures(savedBefore = startedAt) } }
     }
