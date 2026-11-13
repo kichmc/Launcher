@@ -66,6 +66,8 @@ data class AppDrawerUiState(
     val query: String = "",
     val columns: Int = 4,
     val rows: Int = 6,
+    /** [LauncherSettings.launcherStyle]: decides the style-specific drawer chrome (see LauncherStyleSpec). */
+    val launcherStyle: String = com.kich.launcher.model.LauncherSettings.STYLE_UNIVERSAL,
     val dockKeys: Set<String> = emptySet(),
     /** Folders in the dock: slots taken like [dockKeys]' apps. */
     val dockFolders: Int = 0,
@@ -173,6 +175,7 @@ class AppDrawerViewModel @Inject constructor(
             query = q,
             columns = settings.drawerColumns,
             rows = settings.drawerRows,
+            launcherStyle = settings.launcherStyle,
             dockKeys = dockRows.filter { it.isApp && it.key in installed }.mapTo(LinkedHashSet()) { it.key },
             dockFolders = dockRows.count { it.isFolder },
             dockColumns = settings.dockColumns,

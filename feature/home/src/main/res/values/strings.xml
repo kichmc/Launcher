@@ -151,4 +151,7 @@
     <string name="pin_request_close">Close</string>
     <string name="pin_request_work_profile">Work profile widgets can\'t be added yet.</string>
     <string name="pin_request_too_big">This widget is too big for the home screen.</string>
+    <string name="one_ui_edit_wallpaper">Wallpaper and style</string>
+    <string name="one_ui_edit_themes">Themes</string>
+    <string name="one_ui_edit_settings">Settings</string>
 </resources>

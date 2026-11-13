@@ -439,6 +439,13 @@ class SettingsViewModel @Inject constructor(
             LauncherSettings.STYLE_ONE_UI -> {
                 repository.setHomeColumns(4); repository.setDrawerColumns(4); repository.setDrawerRows(6)
                 repository.setShowDrawerSearch(true)
+                // One UI look: no dock labels, a dark see-through drawer over the (blurred) wallpaper.
+                // The page editor, "=" + house page dots and the pill search follow from the style
+                // itself (see LauncherStyleSpec), not from these values.
+                repository.setShowDockLabels(false)
+                repository.setDrawerBackgroundColor(0xFF1B1722.toInt())
+                repository.setDrawerBackgroundOpacity(0.62f)
+                repository.setBlurBehindDrawer(true)
             }
             LauncherSettings.STYLE_PIXEL -> {
                 repository.setHomeColumns(4); repository.setDrawerColumns(4); repository.setDrawerRows(5)

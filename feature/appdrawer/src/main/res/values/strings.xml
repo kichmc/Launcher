@@ -38,4 +38,5 @@
     <string name="work_apps_unpause">Unpause</string>
     <string name="work_apps_paused_title">Work apps are paused</string>
     <string name="work_apps_paused_body">Work apps can\'t send notifications, use the battery or access your location.</string>
+    <string name="one_ui_drawer_settings">Settings</string>
 </resources>

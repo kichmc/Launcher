@@ -1,5 +1,10 @@
 package com.kich.launcher.feature.appdrawer
 
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.ui.draw.shadow
+import com.kich.launcher.model.LauncherStyleSpec
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -292,6 +297,8 @@ fun AppDrawerScreen(
         badgeShowCount = uiState.notificationDotCount,
         badgeScale = uiState.notificationDotScale,
         showSearch = uiState.showSearch,
+        styleSpec = LauncherStyleSpec.of(uiState.launcherStyle),
+        onOpenSettings = onOpenSettings,
         onQueryChange = viewModel::onQueryChange,
         onFolderClick = { folder, bounds -> if (drawerOpen) folderCard = folder.id to bounds },
         onFolderLongClick = { if (drawerOpen) editFolderId = it.id },
@@ -464,6 +471,8 @@ private fun AppDrawerContent(
     badgeShowCount: Boolean,
     badgeScale: Float,
     showSearch: Boolean,
+    styleSpec: LauncherStyleSpec,
+    onOpenSettings: () -> Unit,
     onQueryChange: (String) -> Unit,
     onFolderClick: (DrawerFolderUi, Rect) -> Unit,
     onFolderLongClick: (DrawerFolderUi) -> Unit,
@@ -556,7 +565,7 @@ private fun AppDrawerContent(
                 .safeDrawingPadding()
                 .nestedScroll(pullConnection),
         ) {
-            DragHandle()
+            if (styleSpec.drawerOneUiChrome) OneUiDrawerTopBar(onOpenSettings) else DragHandle()
             val context = LocalContext.current
             val searching = query.isNotBlank()
             var gridWidthPx by remember { mutableStateOf(0) }
@@ -763,7 +772,7 @@ private fun AppDrawerContent(
                                 repeat(pageCount) { index ->
                                     Box(
                                         modifier = Modifier
-                                            .size(width = if (index == appPager.currentPage) 18.dp else 7.dp, height = 7.dp)
+                                            .size(width = if (index == appPager.currentPage && !styleSpec.drawerOneUiChrome) 18.dp else 7.dp, height = 7.dp)
                                             .background(
                                                 color = if (index == appPager.currentPage) MaterialTheme.colorScheme.onSurface
                                                 else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.32f),
@@ -808,7 +817,9 @@ private fun AppDrawerContent(
                 }
             }
             }
-            if (showSearch) {
+            if (showSearch && styleSpec.drawerPillSearch) {
+                OneUiSearchPill(query = query, onQueryChange = onQueryChange)
+            } else if (showSearch) {
                 val searchPalette = LocalExpressivePalette.current
                 // Version C: rounded pill, surfaceHi background, Accent cursor, no underline.
                 TextField(
@@ -1552,5 +1563,97 @@ private fun ContactResultRow(contact: SearchResult.Contact) {
                 }
             }) { Icon(painter = painterResource(LauncherIcons.Message), contentDescription = messageDesc, tint = p.accent) }
         }
+    }
+}
+
+
+/** One UI-style top row of the drawer: a three-dot menu at the right (original artwork). */
+@Composable
+private fun OneUiDrawerTopBar(onOpenSettings: () -> Unit) {
+    var open by remember { mutableStateOf(false) }
+    Box(modifier = Modifier.fillMaxWidth().height(48.dp), contentAlignment = Alignment.CenterEnd) {
+        IconButton(onClick = { open = true }, modifier = Modifier.padding(end = 12.dp)) {
+            Icon(
+                painter = painterResource(R.drawable.ic_ou_more),
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurface,
+            )
+        }
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            DropdownMenuItem(
+                text = { Text(stringResource(R.string.one_ui_drawer_settings)) },
+                onClick = {
+                    open = false
+                    onOpenSettings()
+                },
+            )
+        }
+    }
+}
+
+/** The One UI-style floating search pill: search icon, hint, microphone. Typing filters apps as usual. */
+@Composable
+private fun OneUiSearchPill(query: String, onQueryChange: (String) -> Unit) {
+    val context = LocalContext.current
+    Box(
+        modifier = Modifier.fillMaxWidth().padding(top = 6.dp, bottom = 14.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        TextField(
+            value = query,
+            onValueChange = onQueryChange,
+            singleLine = true,
+            placeholder = {
+                Text(stringResource(R.string.app_drawer_search_hint), fontWeight = FontWeight.SemiBold, maxLines = 1)
+            },
+            leadingIcon = {
+                Icon(
+                    painter = painterResource(R.drawable.ic_ou_search),
+                    contentDescription = null,
+                    tint = Color.White.copy(alpha = 0.75f),
+                )
+            },
+            trailingIcon = {
+                if (query.isNotEmpty()) {
+                    IconButton(onClick = { onQueryChange("") }) {
+                        Icon(
+                            painter = painterResource(LauncherIcons.Close),
+                            contentDescription = stringResource(R.string.search_clear),
+                            tint = Color.White.copy(alpha = 0.8f),
+                        )
+                    }
+                } else {
+                    IconButton(onClick = {
+                        runCatching {
+                            context.startActivity(
+                                android.content.Intent(android.speech.RecognizerIntent.ACTION_WEB_SEARCH)
+                                    .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK),
+                            )
+                        }
+                    }) {
+                        Icon(
+                            painter = painterResource(R.drawable.ic_ou_mic),
+                            contentDescription = null,
+                            tint = Color.White.copy(alpha = 0.6f),
+                        )
+                    }
+                }
+            },
+            shape = CircleShape,
+            colors = TextFieldDefaults.colors(
+                focusedContainerColor = Color(0xCC2B2B2E),
+                unfocusedContainerColor = Color(0xCC2B2B2E),
+                focusedIndicatorColor = Color.Transparent,
+                unfocusedIndicatorColor = Color.Transparent,
+                cursorColor = Color.White,
+                focusedTextColor = Color.White,
+                unfocusedTextColor = Color.White,
+                focusedPlaceholderColor = Color.White.copy(alpha = 0.65f),
+                unfocusedPlaceholderColor = Color.White.copy(alpha = 0.65f),
+            ),
+            modifier = Modifier
+                .fillMaxWidth(0.78f)
+                .shadow(10.dp, CircleShape),
+        )
     }
 }

@@ -94,6 +94,12 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.withContext
 import com.kich.launcher.model.AppItem
+import com.kich.launcher.model.LauncherStyleSpec
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import com.kich.launcher.ui.AppActionPopup
 import com.kich.launcher.ui.AppActions
 import com.kich.launcher.ui.DefaultLauncher
@@ -246,6 +252,13 @@ fun HomeScreen(
     var openFolderId by remember { mutableStateOf<Long?>(null) }
     // Empty-area long-press options popup (anchor + whether it flips above the press point).
     var homeOptions by remember { mutableStateOf<Pair<IntOffset, Boolean>?>(null) }
+    // The launcher style decides which style-specific behaviours are on (One UI: page editor, dots).
+    val styleSpec = remember(settings.launcherStyle) { LauncherStyleSpec.of(settings.launcherStyle) }
+    // One UI edit mode: the home pages shrunk into cards (see OneUiPageEditor).
+    var editingPages by remember { mutableStateOf(false) }
+    val pageEditorShown = editingPages && styleSpec.pageEditor
+    // HOME pressed (or the home gesture) leaves edit mode, like the widget editor.
+    LaunchedEffect(homeSignals) { homeSignals.collect { editingPages = false } }
     // Page the workspace should show after a page was added or removed from the empty-area menu.
     val pageRequests = remember { MutableSharedFlow<Int>(extraBufferCapacity = 1) }
     val defaultFolderName = stringResource(UiR.string.folder_default_name)
@@ -591,8 +604,8 @@ fun HomeScreen(
                 // Paused likewise while a folder is open: the card is composed inside this Box, so a
                 // scroll of its grid, or a vertical slip before a hold completes, would otherwise
                 // open the drawer or the shade through it.
-                swipeUpForDrawer = settings.swipeUpForDrawer && !showOnboarding && openFolderId == null,
-                swipeDownForNotifications = settings.swipeDownForNotifications && !showOnboarding && openFolderId == null,
+                swipeUpForDrawer = settings.swipeUpForDrawer && !showOnboarding && openFolderId == null && !pageEditorShown,
+                swipeDownForNotifications = settings.swipeDownForNotifications && !showOnboarding && openFolderId == null && !pageEditorShown,
                 dragController = dragController,
                 onDrawerDrag = onDrawerDrag,
                 onDrawerSettle = onDrawerSettle,
@@ -603,20 +616,20 @@ fun HomeScreen(
                 bottomGestureZonePx = WindowInsets.mandatorySystemGestures.getBottom(LocalDensity.current).toFloat(),
                 onOpenNotifications = { NotificationShade.expand(context) },
                 // Left-edge action: a right-drag on the leftmost page launches the configured app.
-                leftEdgeEnabled = leftSwipeAvailable && !showOnboarding && openFolderId == null,
+                leftEdgeEnabled = leftSwipeAvailable && !showOnboarding && openFolderId == null && !pageEditorShown,
                 atLeftEdge = { dragController.currentPage == 0 },
                 onLeftEdgeAction = viewModel::onLeftSwipe,
                 // Issue #17 (opt-in): a swipe up from a home folder icon opens the folder's first app.
-                folderSwipeOpensFirstApp = settings.folderSwipeOpensFirstApp && !showOnboarding && openFolderId == null,
+                folderSwipeOpensFirstApp = settings.folderSwipeOpensFirstApp && !showOnboarding && openFolderId == null && !pageEditorShown,
                 onFolderSwipeUp = { id ->
                     uiState.entries.filterIsInstance<PlacedFolder>().firstOrNull { it.id == id }?.apps?.firstOrNull()?.let(launchApp)
                 },
                 // "Swipe up opens" (Edit): a swipe up from a home or dock app icon opens the app chosen for it.
-                appSwipeUpTargets = if (!showOnboarding && openFolderId == null) uiState.swipeUpTargets else emptyMap(),
+                appSwipeUpTargets = if (!showOnboarding && openFolderId == null && !pageEditorShown) uiState.swipeUpTargets else emptyMap(),
                 onAppSwipeUp = { launchApp(it) },
             ),
     ) {
-        Column(modifier = Modifier.fillMaxSize()) {
+        Column(modifier = Modifier.fillMaxSize().graphicsLayer { alpha = if (pageEditorShown) 0f else 1f }) {
             if (settings.showStatusBar) {
                 val density = LocalDensity.current
                 // The status-bar zone height: use the display-cutout band (≈ system status bar height,
@@ -679,6 +692,8 @@ fun HomeScreen(
                 showPageIndicator = settings.showPageIndicator,
                 widgetEdgesAlignWithIcons = settings.widgetEdgesAlignWithIcons,
                 homePageMarker = settings.homePageMarker,
+                oneUiPageDots = styleSpec.oneUiPageDots,
+                onPageMenuClick = if (styleSpec.pageEditor) ({ editingPages = true }) else null,
                 infiniteScroll = settings.infiniteScroll,
                 // Same condition as pixelHomeSwipe's left-edge gesture above: while it owns the
                 // right-drag on page 0, page 0 must not wrap back.
@@ -704,7 +719,10 @@ fun HomeScreen(
                 onRemoveFolder = { viewModel.removeFolder(it) },
                 onCreateFolder = { target, dropped -> viewModel.createFolder(target, dropped, defaultFolderName) },
                 onAddToFolder = { app, folderId -> viewModel.addToFolder(app, folderId) },
-                onEmptyAreaMenu = { anchor, above -> homeOptions = anchor to above },
+                onEmptyAreaMenu = { anchor, above ->
+                    // One UI: a long press on empty space enters the page editor instead of the small popup.
+                    if (styleSpec.pageEditor) editingPages = true else homeOptions = anchor to above
+                },
                 onEmptyAreaDoubleTap = {
                     // `settings` is this composition's value; Workspace reads the latest lambda via
                     // rememberUpdatedState, so a toggled setting takes effect without a restart.
@@ -786,6 +804,70 @@ fun HomeScreen(
                         .homeDockPadding(bottomSpacing = settings.dockBottomSpacing.dp),
                 )
             }
+        }
+
+        AnimatedVisibility(
+            visible = pageEditorShown,
+            enter = fadeIn() + scaleIn(initialScale = 1.12f),
+            exit = fadeOut() + scaleOut(targetScale = 1.12f),
+        ) {
+            OneUiPageEditor(
+                pageCount = uiState.pageCount,
+                homePage = uiState.homePage,
+                startPage = dragController.currentPage,
+                entries = uiState.entries,
+                columns = settings.homeColumns,
+                rows = settings.homeRows,
+                canEditPages = !settings.desktopLocked,
+                canAddPage = uiState.pageCount < com.kich.launcher.data.HomeLayoutRepository.MAX_PAGES,
+                onSetHome = { viewModel.setHomePage(it) },
+                onDeletePage = { page ->
+                    widgetScope.launch {
+                        when (val target = viewModel.removeEmptyPage(page)) {
+                            null -> widgetMessage(R.string.home_options_page_not_empty)
+                            PAGE_FAILED -> widgetMessage(R.string.home_options_page_failed)
+                            else -> pageRequests.tryEmit(target)
+                        }
+                    }
+                },
+                onAddPage = {
+                    widgetScope.launch {
+                        val at = viewModel.insertPage(viewModel.uiState.value.pageCount)
+                        when {
+                            at >= 0 -> pageRequests.tryEmit(at)
+                            at == PAGE_FAILED -> widgetMessage(R.string.home_options_page_failed)
+                            else -> widgetMessage(R.string.home_options_page_limit)
+                        }
+                    }
+                },
+                onOpenPage = { page ->
+                    editingPages = false
+                    pageRequests.tryEmit(page)
+                },
+                onWallpaper = {
+                    editingPages = false
+                    runCatching {
+                        context.startActivity(
+                            Intent.createChooser(Intent(Intent.ACTION_SET_WALLPAPER), null)
+                                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                        )
+                    }
+                },
+                onThemes = {
+                    editingPages = false
+                    onOpenSettings()
+                },
+                onWidgets = {
+                    editingPages = false
+                    widgetPickerPackage = null
+                    showWidgetPicker = true
+                },
+                onSettings = {
+                    editingPages = false
+                    onOpenSettings()
+                },
+                onDismiss = { editingPages = false },
+            )
         }
 
         // A lifted folder on the move: a dock folder on its way to the grid, or a home folder on its

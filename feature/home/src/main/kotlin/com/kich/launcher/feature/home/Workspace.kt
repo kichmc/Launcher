@@ -158,6 +158,10 @@ internal fun Workspace(
     labelColor: Color = Color.White,
     showPageIndicator: Boolean,
     homePageMarker: String = LauncherSettings.MARKER_RING,
+    /** Draws the One UI-style indicator ("=" glyph, house, round dots) in place of [PageDots]. */
+    oneUiPageDots: Boolean = false,
+    /** Tap on the One UI indicator's leading "=" glyph (opens the page editor). */
+    onPageMenuClick: (() -> Unit)? = null,
     /** Swiping on from the last page continues to the first, and back from the first to the last
      *  (see WorkspaceWrap.kt). Off: the last page bounces back from the empty drop page. */
     infiniteScroll: Boolean = false,
@@ -1752,15 +1756,30 @@ internal fun Workspace(
             }
 
             if (showPageIndicator && pageCount > 1) {
-                PageDots(
-                    count = pageCount,
-                    current = dotForPagerPage(pagerState.currentPage, pageCount, tailCopy),
-                    home = homeIndex,
-                    homeMarker = homePageMarker,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = PAGE_DOTS_PADDING),
-                )
+                if (oneUiPageDots) {
+                    // Same row height as the stock dots, so switching style never shifts the grid.
+                    Box(
+                        modifier = Modifier.fillMaxWidth().height(pageDotsRowHeight(homePageMarker)),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        OneUiPageDots(
+                            count = pageCount,
+                            current = dotForPagerPage(pagerState.currentPage, pageCount, tailCopy),
+                            home = homeIndex,
+                            onMenuClick = onPageMenuClick,
+                        )
+                    }
+                } else {
+                    PageDots(
+                        count = pageCount,
+                        current = dotForPagerPage(pagerState.currentPage, pageCount, tailCopy),
+                        home = homeIndex,
+                        homeMarker = homePageMarker,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = PAGE_DOTS_PADDING),
+                    )
+                }
             }
         }
         // Just above the page dots (or where they would be): touch-transparent text.
