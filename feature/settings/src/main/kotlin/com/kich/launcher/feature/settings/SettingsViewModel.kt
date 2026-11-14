@@ -5,6 +5,7 @@ import com.kich.launcher.data.DrawerWallpaperStore
 import com.kich.launcher.data.DrawerWallpaper
 import android.net.Uri
 import java.io.File
+import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -15,6 +16,7 @@ import org.json.JSONObject
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
@@ -68,6 +70,10 @@ class SettingsViewModel @Inject constructor(
         refreshProfiles()
         viewModelScope.launch {
             profileMutex.withLock {
+                // A switch/creation that died half-way (process killed, device rebooted) leaves the
+                // Room selector, the live settings and the persisted active id disagreeing. Repair
+                // that before anything reads or writes either workspace.
+                recoverInterruptedSwitchLocked()
                 // Room now keeps a physical partition for every AK workspace. On an upgrade, the
                 // existing shared rows are User 1's rows; other users are imported once from their
                 // last snapshot. Thereafter switching only changes the active partition selector.
@@ -92,6 +98,44 @@ class SettingsViewModel @Inject constructor(
                 if (activeId == "user1" && !profilePrefs.contains("snapshot_user1")) saveProfileSnapshot("user1")
             }
         }
+    }
+
+    /**
+     * Constructing this ViewModel already reconciles the Room partition selector with the persisted
+     * active workspace (see `init`). The launcher calls this at start so the reconciliation does not
+     * depend on Settings or the switcher having been opened first.
+     */
+    fun ensureWorkspaceReconciled() = Unit
+
+    /** Written (after the outgoing snapshot is safely saved) before a switch changes anything, and
+     *  removed in the same atomic commit that publishes the new active id. Present at startup = the
+     *  last switch never finished. Format: `<fromId>><toId>`. */
+    private fun beginSwitchJournal(from: String, to: String): Boolean =
+        profilePrefs.edit().putString(KEY_SWITCH_JOURNAL, "$from>$to").commit()
+
+    /**
+     * The persisted active id is committed last in every switch, so it is the authority: put the Room
+     * selector and the live settings back to that workspace's saved state, and discard a workspace
+     * whose creation never reached the profile list. Must be called while [profileMutex] is held.
+     */
+    private suspend fun recoverInterruptedSwitchLocked() {
+        val journal = profilePrefs.getString(KEY_SWITCH_JOURNAL, null) ?: return
+        runCatching {
+            val active = activeProfileId()
+            val target = journal.substringAfter('>', "")
+            homeLayoutRepository.setActiveWorkspace(active)
+            val savedSettings = runCatching {
+                JSONObject(profilePrefs.getString("snapshot_$active", "{}")).optJSONObject("settings")
+            }.getOrNull()
+            if (savedSettings != null) {
+                repository.importRaw(jsonToPreferenceMap(savedSettings), preserveLocalImages = false, preserveAppUsage = false)
+            }
+            if (target != active && target.matches(Regex("[A-Za-z0-9_-]{1,40}")) && _profiles.value.none { it.id == target }) {
+                homeLayoutRepository.deleteWorkspace(target)
+                profilePrefs.edit().remove("snapshot_$target").remove("layout_partitioned_$target").commit()
+            }
+        }
+        profilePrefs.edit().remove(KEY_SWITCH_JOURNAL).commit()
     }
 
     private fun refreshProfiles() {
@@ -130,13 +174,19 @@ class SettingsViewModel @Inject constructor(
         val clean = name.trim().take(24)
         if (clean.isBlank()) return
         viewModelScope.launch {
-            profileMutex.withLock {
-                if (_profiles.value.size >= 5) return@withLock
+            profileMutex.withLock { withContext(NonCancellable) {
+                refreshProfiles()
+                if (_profiles.value.size >= 5) return@withContext
+                // A locked workspace must not be cloned (layout, hidden apps, settings) into a new,
+                // unlocked one by anyone who can reach the Quick Settings switcher without its PIN.
+                if (lockManager.isLocked()) return@withContext
                 val oldId = activeProfileId()
                 val originalLayout = homeLayoutRepository.snapshotLayout()
                 saveProfileSnapshot(oldId)
 
                 val id = "ak_" + java.util.UUID.randomUUID().toString().take(8)
+                // No journal, no switch: better to refuse than to risk an unrecoverable half-switch.
+                if (!beginSwitchJournal(oldId, id)) return@withContext
                 // A new workspace starts with the current settings as a useful default, but gets
                 // its own snapshot from the moment it is created.
                 // Clone the app/folder arrangement, but do not duplicate bound widget IDs: Android
@@ -150,18 +200,24 @@ class SettingsViewModel @Inject constructor(
                     val updated = _profiles.value.map { it.copy(active = false) } +
                         AkWorkspaceProfile(id, clean, true)
                     saveProfileList(updated)
-                    check(withContext(Dispatchers.IO) { ProfileLockManager.markerClearedEditor(profilePrefs.edit().putString("active", id)).commit() })
+                    check(withContext(Dispatchers.IO) {
+                        ProfileLockManager.markerClearedEditor(profilePrefs.edit().putString("active", id))
+                            .remove(KEY_SWITCH_JOURNAL).commit()
+                    })
                     drawerWallpaper.reloadForActiveProfile()
                     refreshMotivationWidget()
                     refreshProfiles()
                 } catch (_: Exception) {
                     runCatching { homeLayoutRepository.setActiveWorkspace(oldId) }
+                    runCatching { homeLayoutRepository.deleteWorkspace(id) }
                     runCatching { homeLayoutRepository.restoreLayout(originalLayout) }
                     profilePrefs.edit().putString("active", oldId)
-                        .remove("layout_partitioned_$id").remove("snapshot_$id").commit()
-                    saveProfileList(_profiles.value)
+                        .remove("layout_partitioned_$id").remove("snapshot_$id").remove(KEY_SWITCH_JOURNAL).commit()
+                    // The list may already hold the new entry (the failure can come after it was saved).
+                    saveProfileList(_profiles.value.filterNot { it.id == id })
+                    refreshProfiles()
                 }
-            }
+            } }
         }
     }
 
@@ -170,6 +226,9 @@ class SettingsViewModel @Inject constructor(
         if (clean.isBlank()) return
         viewModelScope.launch {
             profileMutex.withLock {
+                // Another ViewModel instance (Settings, launcher, Quick Settings switcher) may have
+                // changed the list since this one read it; never write back a stale copy.
+                refreshProfiles()
                 val current = _profiles.value
                 if (current.none { it.id == id }) return@withLock
                 val updated = current.map { if (it.id == id) it.copy(name = clean) else it }
@@ -179,12 +238,23 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
-    fun activateAkProfile(id: String) {
+    /**
+     * Switches to workspace [id]. [onDone] receives true when [id] is the active workspace afterwards.
+     * The switch is several writes (Room selector, settings, active id); it runs [NonCancellable] so
+     * closing the Settings screen or the Quick Settings switcher mid-switch cannot leave it half done.
+     */
+    fun activateAkProfile(id: String, onDone: (Boolean) -> Unit = {}) {
         viewModelScope.launch {
+            var ok = false
             profileMutex.withLock {
-                if (_profiles.value.none { it.id == id }) return@withLock
-                activateProfileLocked(id, saveCurrent = true)
+                withContext(NonCancellable) {
+                    refreshProfiles()
+                    if (_profiles.value.none { it.id == id }) return@withContext
+                    activateProfileLocked(id, saveCurrent = true)
+                    ok = activeProfileId() == id
+                }
             }
+            onDone(ok)
         }
     }
 
@@ -193,6 +263,7 @@ class SettingsViewModel @Inject constructor(
         val oldId = activeProfileId()
         if (oldId == id) return
         if (saveCurrent) saveProfileSnapshot(oldId)
+        if (!beginSwitchJournal(oldId, id)) return
 
         // Settings remain snapshot-based, but Room layouts now live in separate profileId
         // partitions. Select the target partition first; import a legacy snapshot only once, then
@@ -226,13 +297,17 @@ class SettingsViewModel @Inject constructor(
                 homeLayoutRepository.cloneLayoutIntoActiveWorkspace(initialLayout)
                 check(profilePrefs.edit().putBoolean(partitionKey, true).commit())
             }
-            check(withContext(Dispatchers.IO) { ProfileLockManager.markerClearedEditor(profilePrefs.edit().putString("active", id)).commit() })
+            // Publishing the new active id, locking the old workspace and closing the journal are ONE commit.
+            check(withContext(Dispatchers.IO) {
+                ProfileLockManager.markerClearedEditor(profilePrefs.edit().putString("active", id))
+                    .remove(KEY_SWITCH_JOURNAL).commit()
+            })
         } catch (_: Exception) {
             // Restore the previous Room partition before restoring its layout.
             runCatching { homeLayoutRepository.setActiveWorkspace(oldId) }
             runCatching { repository.importRaw(beforeSettings, preserveLocalImages = false, preserveAppUsage = false) }
             runCatching { homeLayoutRepository.restoreLayout(beforeLayout) }
-            profilePrefs.edit().putString("active", oldId).commit()
+            profilePrefs.edit().putString("active", oldId).remove(KEY_SWITCH_JOURNAL).commit()
             return
         }
         drawerWallpaper.reloadForActiveProfile()
@@ -241,7 +316,12 @@ class SettingsViewModel @Inject constructor(
     }
 
     private fun refreshMotivationWidget() {
-        appContext.sendBroadcast(Intent("com.kich.launcher.motivation.PROFILE_CHANGED").setPackage(appContext.packageName))
+        // Explicit component: the receiver declares no intent-filter for this action, so the previous
+        // package-only broadcast was never delivered and widgets kept the old workspace's look/quote.
+        appContext.sendBroadcast(
+            Intent("com.kich.launcher.motivation.PROFILE_CHANGED")
+                .setComponent(ComponentName(appContext.packageName, "com.kich.launcher.motivation.MotivationWidgetProvider")),
+        )
     }
 
     private fun activeProfileId(): String = profilePrefs.getString("active", "user1")
@@ -313,8 +393,9 @@ class SettingsViewModel @Inject constructor(
                 else withContext(Dispatchers.Default) { lockManager.store.verifyPin(id, pin) }
                 if (check != PinCheck.Success) { onResult(check); return@launch }
             }
-            profileMutex.withLock {
-                if (_profiles.value.none { it.id == id }) return@withLock
+            profileMutex.withLock { withContext(NonCancellable) {
+                refreshProfiles()
+                if (_profiles.value.none { it.id == id }) return@withContext
                 // Restore User 1 while the deleted profile is still the recorded active profile.
                 // Setting active=user1 before this call would make the old-profile snapshot write
                 // overwrite User 1's own saved snapshot with the deleted profile's settings.
@@ -322,6 +403,9 @@ class SettingsViewModel @Inject constructor(
                     activateProfileLocked("user1", saveCurrent = false)
                 }
                 val remaining = _profiles.value.filterNot { it.id == id }
+                // Drop the list entry first: a crash after this leaves harmless orphaned files, whereas
+                // the old order could leave a listed workspace whose data was already gone.
+                saveProfileList(remaining)
                 homeLayoutRepository.deleteWorkspace(id)
                 profilePrefs.edit().remove("snapshot_$id").remove("layout_partitioned_$id").apply()
                 // Remove files owned only by the deleted virtual workspace. User 1 is protected
@@ -334,10 +418,9 @@ class SettingsViewModel @Inject constructor(
                 appContext.getSharedPreferences("kich_motivation_$id", Context.MODE_PRIVATE).edit().clear().apply()
                 lockManager.store.delete(id)
                 BiometricUnlock.deleteKey(id)
-                saveProfileList(remaining)
                 refreshProfiles()
                 onResult(PinCheck.Success)
-            }
+            } }
         }
     }
 
@@ -555,3 +638,8 @@ class SettingsViewModel @Inject constructor(
 private object AkProfileMutationLock {
     val mutex = Mutex()
 }
+
+/** SharedPreferences key (file `ak_workspace_profiles`) of the in-flight workspace switch, see
+ *  [SettingsViewModel.recoverInterruptedSwitchLocked]. */
+private const val KEY_SWITCH_JOURNAL = "switch_journal"
+

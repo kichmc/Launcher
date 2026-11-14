@@ -85,6 +85,9 @@ class LauncherActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         keepHomeOnBack()
+        // Reconciles Room's active-workspace selector with the persisted active workspace (and repairs
+        // an interrupted switch) on every launcher start, not only after Settings was opened.
+        profileSwitcher.ensureWorkspaceReconciled()
         lifecycleScope.launch { lockManager.returnToFirstRequests.collect { returnToFirstProfileIfRequested() } }
         setContent {
             LauncherAppTheme {

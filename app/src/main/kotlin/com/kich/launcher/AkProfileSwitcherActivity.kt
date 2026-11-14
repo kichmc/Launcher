@@ -58,6 +58,8 @@ private fun AkProfileSwitcherScreen(
     viewModel: SettingsViewModel = hiltViewModel(),
 ) {
     val profiles by viewModel.profiles.collectAsStateWithLifecycle()
+    // Adding a workspace clones the active one; refused (also in the ViewModel) while it is locked.
+    val lockState by viewModel.lockManager.state.collectAsStateWithLifecycle()
     var showAdd by remember { mutableStateOf(false) }
     var newName by remember { mutableStateOf("") }
     var removingId by remember { mutableStateOf<String?>(null) }
@@ -74,7 +76,9 @@ private fun AkProfileSwitcherScreen(
             profiles.forEach { profile ->
                 Card(
                     modifier = Modifier.fillMaxWidth().clickable {
-                        if (!profile.active) viewModel.activateAkProfile(profile.id)
+                        // Leave the picker once the switch has really finished (it is not cancelled
+                        // by leaving), so the chosen workspace is what the launcher shows next.
+                        if (!profile.active) viewModel.activateAkProfile(profile.id) { ok -> if (ok) onDone() }
                     },
                     shape = RoundedCornerShape(18.dp),
                     colors = CardDefaults.cardColors(
@@ -91,7 +95,7 @@ private fun AkProfileSwitcherScreen(
                             if (profile.active) Text("CURRENT WORKSPACE", style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.primary)
                         }
-                        if (!profile.active) TextButton(onClick = { viewModel.activateAkProfile(profile.id) }) {
+                        if (!profile.active) TextButton(onClick = { viewModel.activateAkProfile(profile.id) { ok -> if (ok) onDone() } }) {
                             Text("Switch")
                         }
                         if (profile.id != "user1") TextButton(onClick = {
@@ -106,7 +110,7 @@ private fun AkProfileSwitcherScreen(
 
             OutlinedButton(
                 onClick = { showAdd = true },
-                enabled = profiles.size < 5,
+                enabled = profiles.size < 5 && !lockState.locked,
                 modifier = Modifier.fillMaxWidth(),
             ) { Text("+ Add workspace") }
             Spacer(Modifier.width(1.dp))
