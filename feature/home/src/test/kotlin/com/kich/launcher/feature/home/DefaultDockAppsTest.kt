@@ -6,6 +6,7 @@ import android.content.pm.ActivityInfo
 import android.content.pm.ResolveInfo
 import android.os.Process
 import com.google.common.truth.Truth.assertThat
+import com.kich.launcher.data.resolveDefaultDockKeys
 import com.kich.launcher.model.AppItem
 import org.junit.Test
 import org.junit.runner.RunWith

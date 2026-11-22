@@ -29,6 +29,7 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import com.kich.launcher.data.AppRepository
+import com.kich.launcher.data.resolveDefaultDockKeys
 import com.kich.launcher.data.CustomIconStore
 import com.kich.launcher.data.FolderIconKey
 import com.kich.launcher.data.ShortcutIconKey
@@ -55,7 +56,7 @@ import javax.inject.Inject
 
 /** Default grid footprint of the built-in smartspace widget (clamped to the column count). */
 const val SMARTSPACE_DEFAULT_SPAN_X = 4
-const val SMARTSPACE_DEFAULT_SPAN_Y = 2
+const val SMARTSPACE_DEFAULT_SPAN_Y = com.kich.launcher.data.DefaultWorkspaceLayout.SMARTSPACE_SPAN_Y
 
 /** Smallest allowed smartspace size — below 3 columns the clock + event row no longer fit. */
 const val SMARTSPACE_MIN_SPAN_X = 3

@@ -27,7 +27,20 @@ Settings snapshots remain in `ak_workspace_profiles` SharedPreferences. Layout r
 
 ## Widget handling
 
-A new workspace copies app and folder placement, but intentionally does not duplicate widget rows. Android AppWidget IDs identify actual device-owned widget instances; cloning the same ID into two virtual workspaces would make them share one widget instance and settings. Add widgets separately in each workspace. Existing workspaces retain their own widget rows. The AppWidgetHost cleanup sweep checks widget IDs across **all** AK workspaces, so switching to a workspace without a given widget does not delete an inactive workspace's widget ID.
+A new workspace no longer copies the creating workspace's layout (see "Default layout for new workspaces"). Widget rows are never duplicated between workspaces, and none is added automatically except the built-in clock/date widget. Android AppWidget IDs identify actual device-owned widget instances; cloning the same ID into two virtual workspaces would make them share one widget instance and settings. Add widgets separately in each workspace. Existing workspaces retain their own widget rows. The AppWidgetHost cleanup sweep checks widget IDs across **all** AK workspaces, so switching to a workspace without a given widget does not delete an inactive workspace's widget ID.
+
+## Default layout for new workspaces
+
+`SettingsViewModel.createAkProfile` builds the new workspace's home with `DefaultWorkspaceLayout.plan` (core/data, pure and deterministic) and stores it with `HomeLayoutRepository.initializeDefaultLayout` inside the existing switch journal:
+
+- Page 0: the built-in clock/date (smartspace) widget, full width, 2 rows tall (shortened on grids with fewer rows, dropped on a 1-row grid).
+- Dock: the device's default phone, messages, Settings, browser and camera apps (`resolveDefaultDockKeys`), cut to the dock's column count. Those apps are not repeated on the pages.
+- Pages: every other visible (non-hidden) app, alphabetical by label then key, row by row into the cells the widget leaves free, continuing on new pages (never beyond `MAX_PAGES`). Uses the live grid size; no pixel values.
+- No folders and no app widgets (Weather, Search…) are added: those need a binding or permission the user has not given.
+- `initializeDefaultLayout` refuses when the new partition already has rows, and runs once inside one Room transaction. It is called only from workspace creation, so launching, switching, rotating or restarting never re-applies it.
+- Failure rolls back through the existing journal/catch path (partition deleted, previous workspace restored).
+
+Pre-v9 workspaces opened for the first time after upgrade still import their saved snapshot as before; that migration is unchanged.
 
 ## Platform boundary
 

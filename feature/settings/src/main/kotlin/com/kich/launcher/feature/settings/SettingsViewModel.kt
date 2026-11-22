@@ -26,10 +26,13 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import com.kich.launcher.data.AppRepository
 import com.kich.launcher.data.CustomIconStore
+import com.kich.launcher.data.DefaultWorkspaceLayout
+import com.kich.launcher.data.resolveDefaultDockKeys
 import com.kich.launcher.data.DrawerFolder
 import com.kich.launcher.data.HomeLayoutRepository
 import com.kich.launcher.data.IconPackInfo
@@ -184,18 +187,24 @@ class SettingsViewModel @Inject constructor(
                 val originalLayout = homeLayoutRepository.snapshotLayout()
                 saveProfileSnapshot(oldId)
 
+                // Built before the journal opens: a failure here leaves nothing half-switched.
+                val defaultLayout = buildDefaultLayoutPlan()
                 val id = "ak_" + java.util.UUID.randomUUID().toString().take(8)
                 // No journal, no switch: better to refuse than to risk an unrecoverable half-switch.
                 if (!beginSwitchJournal(oldId, id)) return@withContext
                 // A new workspace starts with the current settings as a useful default, but gets
                 // its own snapshot from the moment it is created.
-                // Clone the app/folder arrangement, but do not duplicate bound widget IDs: Android
-                // widgets are device-owned instances. The new workspace can add its own widgets.
-                val clonedLayout = homeLayoutRepository.snapshotLayout().filterNot { it.isWidget || it.isBuiltin || it.hasFootprint }
-                saveProfileSnapshot(id, clonedLayout)
+                // Its home screen is NOT a copy of the creator's: it gets a fresh default layout
+                // (clock widget, default dock, every other visible app in alphabetical order).
+                // Android widget IDs are device-owned instances, so nothing is cloned that way either.
+                saveProfileSnapshot(id, defaultLayout.home + defaultLayout.dock)
                 try {
                     homeLayoutRepository.setActiveWorkspace(id)
-                    homeLayoutRepository.cloneLayoutIntoActiveWorkspace(clonedLayout)
+                    // Refuses (false) unless the new partition is still empty, so the defaults can
+                    // never land on top of existing rows.
+                    check(homeLayoutRepository.initializeDefaultLayout(defaultLayout)) {
+                        "New AK workspace partition was not empty"
+                    }
                     profilePrefs.edit().putBoolean("layout_partitioned_$id", true).commit()
                     val updated = _profiles.value.map { it.copy(active = false) } +
                         AkWorkspaceProfile(id, clean, true)
@@ -219,6 +228,32 @@ class SettingsViewModel @Inject constructor(
                 }
             } }
         }
+    }
+
+    /**
+     * The first-time home layout for a workspace being created, from the live settings (grid size,
+     * dock capacity, hidden apps) and the installed apps. Nothing is stored here. The app list is
+     * already warm (a shared, replaying flow), so the timeout only covers a cold start: without
+     * apps the plan is just the clock widget and the workspace is still created.
+     */
+    private suspend fun buildDefaultLayoutPlan(): DefaultWorkspaceLayout.Plan {
+        val settings = repository.settings.first()
+        val hidden = repository.hiddenApps.first()
+        val apps = withTimeoutOrNull(APP_LIST_TIMEOUT_MS) { appRepository.apps.first { it.isNotEmpty() } }
+            .orEmpty()
+            .filterNot { it.key in hidden }
+        val dockApps = if (apps.isEmpty()) emptyList() else {
+            val byKey = apps.associateBy { it.key }
+            withContext(Dispatchers.IO) { resolveDefaultDockKeys(appContext, apps) }.mapNotNull { byKey[it] }
+        }
+        return DefaultWorkspaceLayout.plan(
+            apps = apps,
+            dockApps = dockApps,
+            columns = settings.homeColumns,
+            rows = settings.homeRows,
+            dockColumns = settings.dockColumns,
+            smartspaceSpanY = DefaultWorkspaceLayout.SMARTSPACE_SPAN_Y,
+        )
     }
 
     fun renameAkProfile(id: String, name: String) {
@@ -678,4 +713,7 @@ private object AkProfileMutationLock {
 /** SharedPreferences key (file `ak_workspace_profiles`) of the in-flight workspace switch, see
  *  [SettingsViewModel.recoverInterruptedSwitchLocked]. */
 private const val KEY_SWITCH_JOURNAL = "switch_journal"
+
+/** How long workspace creation waits for the installed-app list on a cold start. */
+private const val APP_LIST_TIMEOUT_MS = 3_000L
 

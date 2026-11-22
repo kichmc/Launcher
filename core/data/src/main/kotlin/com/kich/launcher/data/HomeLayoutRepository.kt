@@ -74,6 +74,18 @@ class HomeLayoutRepository @Inject constructor(
         db.withTransaction { dao.replaceLayoutWithFreshIds(items) }
     }
 
+    /**
+     * Stores [plan] (see [DefaultWorkspaceLayout]) as the active workspace's first layout. Refuses —
+     * returns false, nothing written — when the workspace already holds any row, so a default layout
+     * can never be laid over (or mixed into) something the user has arranged. One transaction: the
+     * workspace ends up with the whole default layout or with nothing.
+     */
+    suspend fun initializeDefaultLayout(plan: DefaultWorkspaceLayout.Plan): Boolean = db.withTransaction {
+        if (dao.getAllOnce().isNotEmpty()) return@withTransaction false
+        (plan.home + plan.dock).forEach { insertActive(it.copy(id = 0L)) }
+        true
+    }
+
     /** Switches the Room query/insert partition without copying or deleting another workspace. */
     suspend fun setActiveWorkspace(profileId: String) {
         require(profileId.matches(Regex("[A-Za-z0-9_-]{1,40}")))

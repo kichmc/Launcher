@@ -401,4 +401,27 @@ class HomeLayoutRepositoryTest {
         assertThat(b.cell()).isEqualTo(folderCell)
         assertThat(home.any { it.packageName == "a" }).isTrue()
     }
+
+    @Test
+    fun initializeDefaultLayout_fills_only_an_empty_workspace_and_stays_in_it() = runTest {
+        val apps = (1..10).map { app("p$it") }
+        val plan = DefaultWorkspaceLayout.plan(apps, apps.take(2), 4, 6, 4, 2)
+
+        repo.setActiveWorkspace("ak_one")
+        assertThat(repo.initializeDefaultLayout(plan)).isTrue()
+        val first = repo.snapshotLayout()
+        assertThat(first).hasSize(plan.home.size + plan.dock.size)
+        assertThat(first.map { it.profileId }.toSet()).containsExactly("ak_one")
+
+        // A second call (or a user-arranged workspace) is refused and changes nothing.
+        assertThat(repo.initializeDefaultLayout(plan)).isFalse()
+        assertThat(repo.snapshotLayout()).hasSize(first.size)
+
+        // Another workspace is untouched, and can be initialized with the very same cells.
+        repo.setActiveWorkspace("ak_two")
+        assertThat(repo.snapshotLayout()).isEmpty()
+        assertThat(repo.initializeDefaultLayout(plan)).isTrue()
+        repo.setActiveWorkspace("ak_one")
+        assertThat(repo.snapshotLayout().map { it.id }).containsExactlyElementsIn(first.map { it.id })
+    }
 }
