@@ -125,6 +125,17 @@ interface HomeItemDao {
     @Query("SELECT * FROM home_items WHERE appWidgetId IS NOT NULL")
     suspend fun allWorkspaceWidgetRows(): List<HomeItemEntity>
 
+    /** Host ids bound by one workspace (active or not), so deleting it can free them in the AppWidgetHost. */
+    @Query("SELECT appWidgetId FROM home_items WHERE profileId = :profileId AND appWidgetId IS NOT NULL")
+    suspend fun boundWidgetIdsOfProfile(profileId: String): List<Int>
+
+    /** Widget rows (bound or restored placeholders) of every workspace EXCEPT the active one. */
+    @Query("SELECT * FROM home_items WHERE widgetProvider IS NOT NULL AND profileId != COALESCE((SELECT activeProfileId FROM workspace_state WHERE id = 1), 'user1')")
+    suspend fun inactiveWorkspaceWidgetRows(): List<HomeItemEntity>
+
+    @Query("DELETE FROM home_items WHERE id = :id")
+    suspend fun deleteRowInAnyWorkspace(id: Long)
+
     @Query("UPDATE home_items SET appWidgetId = NULL WHERE id = :id")
     suspend fun clearWidgetIdInAnyWorkspace(id: Long)
 

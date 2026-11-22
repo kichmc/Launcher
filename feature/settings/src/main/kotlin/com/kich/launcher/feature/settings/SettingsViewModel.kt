@@ -390,7 +390,7 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch {
             if (lockManager.store.isEnabled(id)) {
                 val check = if (pin == null) PinCheck.NotConfigured
-                else withContext(Dispatchers.Default) { lockManager.store.verifyPin(id, pin) }
+                else withContext(Dispatchers.Default) { lockManager.store.verify(id, pin) }
                 if (check != PinCheck.Success) { onResult(check); return@launch }
             }
             profileMutex.withLock { withContext(NonCancellable) {
@@ -406,7 +406,9 @@ class SettingsViewModel @Inject constructor(
                 // Drop the list entry first: a crash after this leaves harmless orphaned files, whereas
                 // the old order could leave a listed workspace whose data was already gone.
                 saveProfileList(remaining)
-                homeLayoutRepository.deleteWorkspace(id)
+                // Free the deleted workspace's widgets in the AppWidgetHost now (only its own ids), instead
+                // of leaving them allocated until the next launcher start's sweep.
+                freeWidgetHostIds(homeLayoutRepository.deleteWorkspace(id))
                 profilePrefs.edit().remove("snapshot_$id").remove("layout_partitioned_$id").apply()
                 // Remove files owned only by the deleted virtual workspace. User 1 is protected
                 // above and its legacy drawer-wallpaper directory is never touched here.
@@ -424,6 +426,15 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
+    /** Deletes [ids] from the launcher's AppWidgetHost. Failures are ignored: the startup sweep frees leftovers. */
+    private fun freeWidgetHostIds(ids: List<Int>) {
+        if (ids.isEmpty()) return
+        runCatching {
+            val host = android.appwidget.AppWidgetHost(appContext, com.kich.launcher.data.WidgetHostIds.APPWIDGET_HOST_ID)
+            ids.forEach { id -> runCatching { host.deleteAppWidgetId(id) } }
+        }
+    }
+
     // --- Lock screen (acts only on the ACTIVE profile; ids are never taken from the UI) ---
 
     val lockState = lockManager.state
@@ -438,6 +449,31 @@ class SettingsViewModel @Inject constructor(
 
     suspend fun changeLockPin(old: CharArray, new: CharArray): PinCheck = withContext(Dispatchers.Default) {
         lockManager.store.changePin(lockManager.activeProfileId(), old, new).also { lockManager.refresh() }
+    }
+
+    /** Lock method of any workspace (used so delete prompts ask for the right kind of secret). */
+    fun lockMethodOf(profileId: String): com.kich.launcher.data.lock.LockMethod =
+        lockManager.store.config(profileId).method
+
+    /** Verifies the ACTIVE workspace's current secret (PIN, password or encoded pattern). Charges an attempt. */
+    suspend fun verifyCurrentLock(secret: CharArray): PinCheck = withContext(Dispatchers.Default) {
+        lockManager.store.verify(lockManager.activeProfileId(), secret).also { lockManager.refresh() }
+    }
+
+    /** First-time setup (lock currently off). Keeps the workspace unlocked so setup does not lock you out. */
+    suspend fun setLockCredential(method: com.kich.launcher.data.lock.LockMethod, secret: CharArray): Boolean =
+        withContext(Dispatchers.Default) {
+            val id = lockManager.activeProfileId()
+            val ok = lockManager.store.setCredential(id, method, secret)
+            if (ok) lockManager.markUnlocked(id) else lockManager.refresh()
+            ok
+        }
+
+    /** Replaces the lock only after [current] verifies; on any failure the previous lock stays untouched. */
+    suspend fun changeLockCredential(
+        current: CharArray, method: com.kich.launcher.data.lock.LockMethod, secret: CharArray,
+    ): PinCheck = withContext(Dispatchers.Default) {
+        lockManager.store.changeCredential(lockManager.activeProfileId(), current, method, secret).also { lockManager.refresh() }
     }
 
     suspend fun disableLock(pin: CharArray): PinCheck = withContext(Dispatchers.Default) {

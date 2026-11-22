@@ -214,7 +214,7 @@ fun SettingsScreen(
             return@CompositionLocalProvider
         }
 
-        Surface(modifier = modifier.fillMaxSize(), color = palette.bg) {
+        Surface(modifier = modifier.fillMaxSize(), color = palette.bg, contentColor = palette.text) {
             Column(
                 modifier = Modifier
                     .fillMaxSize()
@@ -870,12 +870,11 @@ fun SettingsScreen(
                 dismissButton = { TextButton(onClick = { deletingAkProfileId = "" }) { Text("Cancel") } },
             )
         } else {
-            PinDialog("Enter this workspace’s PIN to delete it", askOld = true, askNew = false, onDismiss = { deletingAkProfileId = "" }) { pin, _ ->
-                var message: String? = "Could not delete."
+            val method = remember(target) { viewModel.lockMethodOf(target) }
+            VerifyLockDialog("Enter this workspace’s ${method.label().lowercase()} to delete it", method, onDismiss = { deletingAkProfileId = "" }) { secret ->
                 val done = kotlinx.coroutines.CompletableDeferred<String?>()
-                viewModel.deleteAkProfile(target, pin?.copyOf()) { done.complete(pinMessage(it)) }
-                message = done.await()
-                message
+                viewModel.deleteAkProfile(target, secret.copyOf()) { done.complete(lockMessage(it, method)) }
+                done.await()
             }
         }
     }
@@ -1876,7 +1875,7 @@ private fun HiddenAppsManager(
 ) {
     val p = LocalExpressivePalette.current
     BackHandler(onBack = onBack)
-    Surface(modifier = modifier, color = p.bg) {
+    Surface(modifier = modifier, color = p.bg, contentColor = p.text) {
         Column(modifier = Modifier.fillMaxSize().safeDrawingPadding()) {
             Text(
                 text = stringResource(R.string.settings_hidden_apps),

@@ -97,6 +97,34 @@ class HomeLayoutRepositoryTest {
     }
 
     @Test
+    fun deletingAWorkspaceReturnsOnlyItsOwnWidgetIdsAndKeepsOthers() = runTest {
+        repo.addWidgetAt(91, "user1/Widget", null, com.kich.launcher.model.WidgetPlacement(0, 0, 0, 2, 2), 4, 6)
+        repo.setActiveWorkspace("ak_user2")
+        repo.addWidgetAt(92, "user2/Widget", null, com.kich.launcher.model.WidgetPlacement(0, 0, 0, 2, 2), 4, 6)
+        repo.addWidgetAt(93, "user2/Other", null, com.kich.launcher.model.WidgetPlacement(0, 2, 0, 2, 2), 4, 6)
+        repo.setActiveWorkspace("user1")
+
+        assertThat(repo.deleteWorkspace("ak_user2")).containsExactly(92, 93)
+
+        assertThat(repo.allWorkspaceBoundWidgetIds()).containsExactly(91)
+        assertThat(repo.snapshotLayout().mapNotNull { it.appWidgetId }).containsExactly(91)
+    }
+
+    @Test
+    fun uninstallingAProviderRemovesItsWidgetsFromEveryWorkspaceButNoOthers() = runTest {
+        repo.addWidgetAt(91, "gone.pkg/Widget", null, com.kich.launcher.model.WidgetPlacement(0, 0, 0, 2, 2), 4, 6)
+        repo.addWidgetAt(95, "keep.pkg/Widget", null, com.kich.launcher.model.WidgetPlacement(0, 2, 0, 2, 2), 4, 6)
+        repo.setActiveWorkspace("ak_user2")
+        repo.addWidgetAt(92, "gone.pkg/Widget", null, com.kich.launcher.model.WidgetPlacement(0, 0, 0, 2, 2), 4, 6)
+        repo.addWidgetAt(96, "keep.pkg/Widget", null, com.kich.launcher.model.WidgetPlacement(0, 2, 0, 2, 2), 4, 6)
+        repo.setActiveWorkspace("user1")
+
+        repo.removeAppRowsForPackage("gone.pkg", 0L)
+
+        assertThat(repo.allWorkspaceBoundWidgetIds()).containsExactly(95, 96)
+    }
+
+    @Test
     fun cloningIntoAnotherWorkspaceAllocatesNewIdsAndRemapsFolderChildren() = runTest {
         repo.addToHome(app("clone.app"), columns = 4, rows = 6)
         repo.addToHome(app("clone.child"), columns = 4, rows = 6)

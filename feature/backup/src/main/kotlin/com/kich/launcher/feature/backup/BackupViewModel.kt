@@ -22,7 +22,7 @@ import javax.inject.Inject
 
 sealed interface BackupEvent {
     data class Exported(val name: String) : BackupEvent
-    data class Restored(val restored: Int, val skipped: Int) : BackupEvent
+    data class Restored(val restored: Int, val skipped: Int, val widgetsNeedSetup: Int = 0) : BackupEvent
     data object InvalidFile : BackupEvent
     data object TooLarge : BackupEvent
 

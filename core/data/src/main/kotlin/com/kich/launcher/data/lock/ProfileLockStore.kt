@@ -31,6 +31,8 @@ class AndroidLockClock(private val context: Context) : LockClock {
 /** One profile's lock configuration. Never contains a PIN. */
 data class ProfileLockConfig(
     val enabled: Boolean = false,
+    /** Which secret [credential] verifies. Files written before methods existed are PINs. */
+    val method: LockMethod = LockMethod.PIN,
     val credential: PinCredential? = null,
     val fingerprint: Boolean = false,
     /** Keystore-bound biometric verifier (IV + GCM ciphertext); see [BiometricUnlock]. */
@@ -80,24 +82,55 @@ class ProfileLockStore(
 
     /** Creates (or replaces) the PIN and turns the lock on. Resets the attempt counter. */
     @Synchronized
-    fun setPin(id: String, pin: CharArray): Boolean {
-        if (!PinPolicy.isValid(String(pin))) return false
-        val credential = runCatching { hasher.create(pin) }.getOrNull() ?: return false
+    fun setPin(id: String, pin: CharArray): Boolean = setCredential(id, LockMethod.PIN, pin)
+
+    /**
+     * Creates (or replaces) the credential for [method] and turns the lock on. The previous credential
+     * is replaced only by a successful atomic file write; on any failure it stays exactly as it was.
+     * The biometric verifier is kept: fingerprint is independent of which secret is primary.
+     */
+    @Synchronized
+    fun setCredential(id: String, method: LockMethod, secret: CharArray): Boolean {
+        if (!LockPolicy.isValid(method, String(secret))) return false
+        val material = material(method, secret)
+        val credential: PinCredential? = try {
+            hasher.create(material)
+        } catch (_: Exception) {
+            null
+        } finally {
+            material.fill('\u0000')
+        }
+        if (credential == null) return false
         val old = read(id)
-        return write(id, old.copy(enabled = true, credential = credential, failedAttempts = 0, lockoutUntilElapsed = 0L))
+        return write(
+            id,
+            old.copy(
+                enabled = true, method = method, credential = credential,
+                failedAttempts = 0, lockoutUntilElapsed = 0L, lockoutBoot = null, lockoutWallRemainingAtWrite = 0L,
+            ),
+        )
     }
 
     @Synchronized
-    fun changePin(id: String, oldPin: CharArray, newPin: CharArray): PinCheck {
-        val check = verifyPin(id, oldPin)
+    fun changePin(id: String, oldPin: CharArray, newPin: CharArray): PinCheck =
+        changeCredential(id, oldPin, LockMethod.PIN, newPin)
+
+    /**
+     * Switches (or changes) the lock: the CURRENT secret must verify first, then the new method's secret
+     * replaces it in one write. If the new secret is invalid or cannot be saved, nothing changes and the
+     * old lock keeps working.
+     */
+    @Synchronized
+    fun changeCredential(id: String, current: CharArray, newMethod: LockMethod, newSecret: CharArray): PinCheck {
+        val check = verify(id, current)
         if (check != PinCheck.Success) return check
-        return if (setPin(id, newPin)) PinCheck.Success else PinCheck.Unavailable
+        return if (setCredential(id, newMethod, newSecret)) PinCheck.Success else PinCheck.Unavailable
     }
 
-    /** Turns the lock off after the current PIN verifies. Wipes the credential and biometric verifier. */
+    /** Turns the lock off after the current secret verifies. Wipes the credential and biometric verifier. */
     @Synchronized
-    fun disable(id: String, pin: CharArray): PinCheck {
-        val check = verifyPin(id, pin)
+    fun disable(id: String, secret: CharArray): PinCheck {
+        val check = verify(id, secret)
         if (check != PinCheck.Success) return check
         return if (write(id, ProfileLockConfig())) PinCheck.Success else PinCheck.Unavailable
     }
@@ -120,7 +153,11 @@ class ProfileLockStore(
      * so killing the process mid-check cannot buy a free guess.
      */
     @Synchronized
-    fun verifyPin(id: String, pin: CharArray): PinCheck {
+    fun verifyPin(id: String, pin: CharArray): PinCheck = verify(id, pin)
+
+    /** Checks [secret] against whatever method the workspace uses (PIN, password or encoded pattern). */
+    @Synchronized
+    fun verify(id: String, secret: CharArray): PinCheck {
         val cfg = read(id)
         val credential = cfg.credential
         if (!cfg.enabled || credential == null) return PinCheck.NotConfigured
@@ -128,11 +165,14 @@ class ProfileLockStore(
         if (left > 0) return PinCheck.LockedOut(left)
         val charged = cfg.copy(failedAttempts = cfg.failedAttempts + 1)
         if (!write(id, charged)) return PinCheck.Unavailable
+        val material = material(cfg.method, secret)
         val ok = try {
-            hasher.verify(pin, credential)
+            hasher.verify(material, credential)
         } catch (_: Exception) {
             write(id, cfg) // refund: a Keystore fault is not a wrong guess
             return PinCheck.Unavailable
+        } finally {
+            material.fill('\u0000')
         }
         if (ok) {
             write(id, cfg.copy(failedAttempts = 0, lockoutUntilElapsed = 0L, lockoutBoot = null))
@@ -192,12 +232,22 @@ class ProfileLockStore(
         true
     }.getOrDefault(false)
 
+    /**
+     * PINs hash as-is (existing PINs keep verifying). Passwords and patterns get a method prefix so a
+     * password can never be satisfied by a pattern string of the same characters, or vice versa.
+     */
+    private fun material(method: LockMethod, secret: CharArray): CharArray = when (method) {
+        LockMethod.PIN -> secret.copyOf()
+        else -> (method.id + ":").toCharArray() + secret
+    }
+
     private fun b64(b: ByteArray) = Base64.encodeToString(b, Base64.NO_WRAP)
     private fun unb64(s: String) = Base64.decode(s, Base64.NO_WRAP)
 
     private fun toJson(c: ProfileLockConfig) = JSONObject().apply {
         put("v", 1)
         put("enabled", c.enabled)
+        put("method", c.method.id)
         put("fingerprint", c.fingerprint)
         c.credential?.let {
             put("scheme", it.scheme); put("iter", it.iterations)
@@ -215,6 +265,7 @@ class ProfileLockStore(
         val cred = if (j.has("hash")) PinCredential(j.getString("scheme"), j.getInt("iter"), unb64(j.getString("salt")), unb64(j.getString("hash"))) else null
         return ProfileLockConfig(
             enabled = j.optBoolean("enabled"),
+            method = LockMethod.fromId(j.optString("method").takeIf { it.isNotEmpty() }),
             credential = cred,
             fingerprint = j.optBoolean("fingerprint"),
             bioIv = j.optString("bioIv").takeIf { it.isNotEmpty() }?.let(::unb64),

@@ -94,4 +94,77 @@ class ProfileLockStoreTest {
         assertThat(PinPolicy.isValid("123456789")).isFalse()
         assertThat(PinPolicy.isValid("12a4")).isFalse()
     }
+
+    @Test fun passwordAndPatternVerifyOnlyWithTheirOwnMethod() {
+        assertThat(store.setCredential("user1", LockMethod.PASSWORD, "correct horse".toCharArray())).isTrue()
+        assertThat(store.config("user1").method).isEqualTo(LockMethod.PASSWORD)
+        assertThat(store.verify("user1", "correct horse".toCharArray())).isEqualTo(PinCheck.Success)
+        assertThat(store.verify("user1", "wrong horse!".toCharArray())).isInstanceOf(PinCheck.Wrong::class.java)
+
+        assertThat(store.setCredential("ak_b", LockMethod.PATTERN, PatternPolicy.encode(listOf(0, 1, 2, 5)))).isTrue()
+        assertThat(store.verify("ak_b", PatternPolicy.encode(listOf(0, 1, 2, 5)))).isEqualTo(PinCheck.Success)
+        assertThat(store.verify("ak_b", PatternPolicy.encode(listOf(5, 2, 1, 0)))).isInstanceOf(PinCheck.Wrong::class.java)
+    }
+
+    @Test fun methodsAreIndependentPerProfile() {
+        store.setPin("user1", "1234".toCharArray())
+        store.setCredential("ak_b", LockMethod.PASSWORD, "hunter22!".toCharArray())
+        store.setCredential("ak_c", LockMethod.PATTERN, PatternPolicy.encode(listOf(0, 4, 8, 7)))
+        assertThat(store.config("user1").method).isEqualTo(LockMethod.PIN)
+        assertThat(store.config("ak_b").method).isEqualTo(LockMethod.PASSWORD)
+        assertThat(store.config("ak_c").method).isEqualTo(LockMethod.PATTERN)
+        // A secret valid for one workspace never opens another.
+        assertThat(store.verify("user1", "hunter22!".toCharArray())).isInstanceOf(PinCheck.Wrong::class.java)
+    }
+
+    @Test fun passwordAndPatternAreNeverWrittenToDisk() {
+        store.setCredential("user1", LockMethod.PASSWORD, "Zebra-Quartz-77".toCharArray())
+        store.setCredential("ak_b", LockMethod.PATTERN, PatternPolicy.encode(listOf(3, 4, 5, 8, 7)))
+        val text = dir.listFiles()!!.joinToString { it.readText() }
+        assertThat(text).doesNotContain("Zebra-Quartz-77")
+        assertThat(text).doesNotContain("34587")
+    }
+
+    @Test fun changingMethodNeedsCurrentSecretAndKeepsOldLockOnFailure() {
+        store.setPin("user1", "1234".toCharArray())
+        // Wrong current secret: nothing changes.
+        assertThat(store.changeCredential("user1", "0000".toCharArray(), LockMethod.PASSWORD, "new-password".toCharArray()))
+            .isInstanceOf(PinCheck.Wrong::class.java)
+        assertThat(store.config("user1").method).isEqualTo(LockMethod.PIN)
+        // Invalid new secret (too short): old PIN still works.
+        assertThat(store.changeCredential("user1", "1234".toCharArray(), LockMethod.PASSWORD, "abc".toCharArray()))
+            .isEqualTo(PinCheck.Unavailable)
+        assertThat(store.verify("user1", "1234".toCharArray())).isEqualTo(PinCheck.Success)
+        // Valid switch: new method active, old PIN no longer works.
+        assertThat(store.changeCredential("user1", "1234".toCharArray(), LockMethod.PASSWORD, "new-password".toCharArray()))
+            .isEqualTo(PinCheck.Success)
+        assertThat(store.config("user1").method).isEqualTo(LockMethod.PASSWORD)
+        assertThat(store.verify("user1", "new-password".toCharArray())).isEqualTo(PinCheck.Success)
+    }
+
+    @Test fun lockFileWithoutMethodIsAPin() {
+        store.setPin("user1", "1234".toCharArray())
+        val f = File(dir, "user1.json")
+        f.writeText(org.json.JSONObject(f.readText()).apply { remove("method") }.toString())
+        val reopened = ProfileLockStore(context, PinHasher({ NoPepper }, { NoPepper }, iterations = 1_000), clock, dir)
+        assertThat(reopened.config("user1").method).isEqualTo(LockMethod.PIN)
+        assertThat(reopened.verify("user1", "1234".toCharArray())).isEqualTo(PinCheck.Success)
+    }
+
+    @Test fun passwordAndPatternPolicies() {
+        assertThat(PasswordPolicy.isValid("12345")).isFalse()
+        assertThat(PasswordPolicy.isValid("      ")).isFalse()
+        assertThat(PasswordPolicy.isValid("abc def")).isTrue()
+        assertThat(PatternPolicy.isValidDots(listOf(0, 1, 2))).isFalse()        // too short
+        assertThat(PatternPolicy.isValidDots(listOf(0, 1, 2, 2))).isFalse()     // repeated dot
+        assertThat(PatternPolicy.isValidDots(listOf(0, 1, 2, 9))).isFalse()     // off grid
+        assertThat(PatternPolicy.isValidDots(listOf(0, 1, 2, 5))).isTrue()
+    }
+
+    @Test fun fingerprintSettingSurvivesSwitchingMethod() {
+        store.setPin("user1", "1234".toCharArray())
+        store.setBiometric("user1", byteArrayOf(1), byteArrayOf(2))
+        store.changeCredential("user1", "1234".toCharArray(), LockMethod.PATTERN, PatternPolicy.encode(listOf(0, 1, 2, 5)))
+        assertThat(store.config("user1").fingerprint).isTrue()
+    }
 }

@@ -15,9 +15,22 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
+import com.kich.launcher.ui.lock.PatternPad
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -41,7 +54,10 @@ import androidx.compose.ui.semantics.semantics
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import com.kich.launcher.data.lock.BiometricUnlock
+import com.kich.launcher.data.lock.LockMethod
 import com.kich.launcher.data.lock.LockUiState
+import com.kich.launcher.data.lock.PasswordPolicy
+import com.kich.launcher.data.lock.PatternPolicy
 import com.kich.launcher.data.lock.PinCheck
 import com.kich.launcher.data.lock.PinPolicy
 import com.kich.launcher.data.lock.ProfileLockManager
@@ -63,6 +79,10 @@ fun LockScreen(state: LockUiState, manager: ProfileLockManager) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var pin by remember(state.profileId) { mutableStateOf("") }
+    var password by remember(state.profileId) { mutableStateOf("") }
+    var showPassword by remember(state.profileId) { mutableStateOf(false) } // hidden by default
+    var patternError by remember(state.profileId) { mutableStateOf(false) }
+    val noun = when (state.method) { LockMethod.PIN -> "PIN"; LockMethod.PASSWORD -> "password"; LockMethod.PATTERN -> "pattern" }
     var message by remember(state.profileId) { mutableStateOf<String?>(null) }
     var lockoutEndsAt by remember(state.profileId) { mutableLongStateOf(0L) }
     var checking by remember(state.profileId) { mutableStateOf(false) }
@@ -89,14 +109,14 @@ fun LockScreen(state: LockUiState, manager: ProfileLockManager) {
         val iv = cfg.bioIv; val blob = cfg.bioBlob
         if (iv == null || blob == null) return
         promptActive = true
-        BiometricUnlock.authenticate(context, state.profileId, iv, blob, "Unlock", "Use PIN") { r ->
+        BiometricUnlock.authenticate(context, state.profileId, iv, blob, "Unlock", "Use $noun") { r ->
             promptActive = false
             when (r) {
                 is BiometricUnlock.Result.Success -> manager.unlockWithBiometric(state.profileId)
                 BiometricUnlock.Result.KeyInvalidated -> {
                     // Fingerprints changed or the device lock was removed: fall back to PIN only.
                     manager.store.clearBiometric(state.profileId); manager.refresh()
-                    message = "Fingerprints changed. Use your PIN, then re-enable fingerprint in Settings."
+                    message = "Fingerprints changed. Use your $noun, then re-enable fingerprint in Settings."
                 }
                 else -> Unit
             }
@@ -106,27 +126,34 @@ fun LockScreen(state: LockUiState, manager: ProfileLockManager) {
         if (!autoTried) { autoTried = true; startBiometric() }
     }
 
-    fun submit() {
-        if (checking || lockedOut || !PinPolicy.isValid(pin)) return
-        val chars = pin.toCharArray()
+    fun submitSecret(chars: CharArray) {
+        if (checking || lockedOut) { chars.fill('\u0000'); return }
         checking = true
         scope.launch {
-            val result = withContext(Dispatchers.Default) { manager.unlockWithPin(state.profileId, chars) }
-            chars.fill('0')
+            val result = withContext(Dispatchers.Default) { manager.unlockWith(state.profileId, chars) }
+            chars.fill('\u0000')
             checking = false
             when (result) {
                 PinCheck.Success -> Unit // state flips; the host animates this screen away
                 is PinCheck.Wrong -> {
-                    pin = ""
+                    pin = ""; password = ""; patternError = true
                     if (result.lockoutMs > 0) { lockoutEndsAt = System.currentTimeMillis() + result.lockoutMs; message = "Too many attempts" }
-                    else message = "Wrong PIN · ${result.attemptsLeft} tries left"
+                    else message = "Wrong $noun · ${result.attemptsLeft} tries left"
                     for (x in listOf(-18f, 18f, -12f, 12f, 0f)) shake.animateTo(x, tween(40))
                 }
-                is PinCheck.LockedOut -> { pin = ""; lockoutEndsAt = System.currentTimeMillis() + result.remainingMs }
-                PinCheck.Unavailable -> message = "PIN check unavailable. Try again."
-                PinCheck.NotConfigured -> message = "This profile’s lock can’t be verified."
+                is PinCheck.LockedOut -> { pin = ""; password = ""; lockoutEndsAt = System.currentTimeMillis() + result.remainingMs }
+                PinCheck.Unavailable -> message = "Check unavailable. Try again."
+                PinCheck.NotConfigured -> message = "This workspace’s lock can’t be verified."
             }
         }
+    }
+
+    fun submitPin() { if (PinPolicy.isValid(pin)) submitSecret(pin.toCharArray()) }
+    fun submitPassword() { if (password.isNotEmpty()) submitSecret(password.toCharArray()) }
+    fun submitPattern(dots: List<Int>) {
+        // A too-short or malformed drawing is rejected locally and does not cost an attempt.
+        if (!PatternPolicy.isValidDots(dots)) { patternError = true; message = "Connect at least ${PatternPolicy.MIN_DOTS} dots"; return }
+        submitSecret(PatternPolicy.encode(dots))
     }
 
     val time by produceState(System.currentTimeMillis()) {
@@ -137,7 +164,7 @@ fun LockScreen(state: LockUiState, manager: ProfileLockManager) {
 
     Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.55f)).clickable(enabled = false) {}) {
         Column(
-            Modifier.fillMaxSize().systemBarsPadding().padding(horizontal = 24.dp)
+            Modifier.fillMaxSize().systemBarsPadding().imePadding().padding(horizontal = 24.dp)
                 .graphicsLayer { translationY = (1f - appear.value) * 40f; alpha = appear.value },
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
@@ -145,25 +172,67 @@ fun LockScreen(state: LockUiState, manager: ProfileLockManager) {
             Text(timeText, color = Color.White, fontSize = 72.sp, fontWeight = FontWeight.Light)
             Text(dateText, color = Color.White.copy(alpha = 0.85f), fontSize = 18.sp)
             Spacer(Modifier.weight(1f))
-            Row(Modifier.graphicsLayer { translationX = shake.value }, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-                val slots = maxOf(PinPolicy.MIN_LENGTH, pin.length)
-                repeat(slots) { i ->
-                    Box(Modifier.size(14.dp).clip(CircleShape).background(if (i < pin.length) Color.White else Color.White.copy(alpha = 0.3f)))
+            Column(Modifier.graphicsLayer { translationX = shake.value }, horizontalAlignment = Alignment.CenterHorizontally) {
+                when (state.method) {
+                    LockMethod.PIN -> Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                        val slots = maxOf(PinPolicy.MIN_LENGTH, pin.length)
+                        repeat(slots) { i ->
+                            Box(Modifier.size(14.dp).clip(CircleShape).background(if (i < pin.length) Color.White else Color.White.copy(alpha = 0.3f)))
+                        }
+                    }
+                    LockMethod.PASSWORD -> Unit
+                    LockMethod.PATTERN -> PatternPad(
+                        modifier = Modifier.fillMaxWidth().widthIn(max = 280.dp),
+                        enabled = !lockedOut && !checking,
+                        isError = patternError,
+                        showTraceAfterLift = false, // the drawn pattern disappears as soon as the finger lifts
+                        onPatternStart = { patternError = false; message = null },
+                        onPatternComplete = ::submitPattern,
+                    )
                 }
             }
             Text(
                 if (lockedOut) "Try again in ${remainingSec}s" else message ?: " ",
                 color = Color.White.copy(alpha = 0.85f), fontSize = 14.sp, modifier = Modifier.padding(top = 12.dp, bottom = 16.dp),
             )
-            Keypad(
-                enabled = !lockedOut && !checking,
-                showFingerprint = state.fingerprint,
-                canSubmit = PinPolicy.isValid(pin),
-                onDigit = { if (pin.length < PinPolicy.MAX_LENGTH) { pin += it; message = null } },
-                onBackspace = { pin = pin.dropLast(1) },
-                onSubmit = ::submit,
-                onFingerprint = ::startBiometric,
-            )
+            when (state.method) {
+                LockMethod.PIN -> Keypad(
+                    enabled = !lockedOut && !checking,
+                    showFingerprint = state.fingerprint,
+                    canSubmit = PinPolicy.isValid(pin),
+                    onDigit = { if (pin.length < PinPolicy.MAX_LENGTH) { pin += it; message = null } },
+                    onBackspace = { pin = pin.dropLast(1) },
+                    onSubmit = ::submitPin,
+                    onFingerprint = ::startBiometric,
+                )
+                LockMethod.PASSWORD -> Column(Modifier.widthIn(max = 360.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                    OutlinedTextField(
+                        value = password,
+                        onValueChange = { password = it.take(PasswordPolicy.MAX_LENGTH); message = null },
+                        enabled = !lockedOut && !checking,
+                        singleLine = true,
+                        label = { Text("Password") },
+                        visualTransformation = if (showPassword) VisualTransformation.None else PasswordVisualTransformation(),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, imeAction = ImeAction.Done),
+                        keyboardActions = KeyboardActions(onDone = { submitPassword() }),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = Color.White, unfocusedTextColor = Color.White,
+                            focusedBorderColor = Color.White, unfocusedBorderColor = Color.White.copy(alpha = 0.5f),
+                            focusedLabelColor = Color.White, unfocusedLabelColor = Color.White.copy(alpha = 0.7f),
+                            cursorColor = Color.White,
+                        ),
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        TextButton(onClick = { showPassword = !showPassword }) { Text(if (showPassword) "Hide" else "Show", color = Color.White) }
+                        TextButton(enabled = !lockedOut && !checking && password.isNotEmpty(), onClick = ::submitPassword) { Text("Unlock", color = Color.White) }
+                    }
+                }
+                LockMethod.PATTERN -> Unit
+            }
+            if (state.fingerprint && state.method != LockMethod.PIN) {
+                TextButton(onClick = ::startBiometric) { Text("Use fingerprint", color = Color.White) }
+            }
             Spacer(Modifier.height(32.dp))
         }
     }

@@ -14,6 +14,7 @@ data class LockUiState(
     val lockEnabled: Boolean,
     val locked: Boolean,
     val fingerprint: Boolean,
+    val method: LockMethod = LockMethod.PIN,
 )
 
 /**
@@ -102,8 +103,11 @@ class ProfileLockManager private constructor(context: Context) {
         return ok
     }
 
-    suspend fun unlockWithPin(profileId: String, pin: CharArray): PinCheck {
-        val result = store.verifyPin(profileId, pin)
+    suspend fun unlockWithPin(profileId: String, pin: CharArray): PinCheck = unlockWith(profileId, pin)
+
+    /** Verifies a PIN, password or encoded pattern (whatever the workspace's own method is). */
+    suspend fun unlockWith(profileId: String, secret: CharArray): PinCheck {
+        val result = store.verify(profileId, secret)
         if (result == PinCheck.Success && !markUnlocked(profileId)) return PinCheck.NotConfigured
         return result
     }
@@ -124,6 +128,7 @@ class ProfileLockManager private constructor(context: Context) {
             lockEnabled = cfg.enabled,
             locked = cfg.enabled && !unlocked,
             fingerprint = cfg.enabled && cfg.fingerprint && cfg.bioBlob != null,
+            method = cfg.method,
         )
     }
 

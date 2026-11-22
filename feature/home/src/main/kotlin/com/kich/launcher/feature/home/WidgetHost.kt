@@ -12,7 +12,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import com.kich.launcher.data.HomeLayoutRepository
 
 /** App-unique id for our single AppWidgetHost ("ARK1"). */
-const val APPWIDGET_HOST_ID = 0x41524B31
+const val APPWIDGET_HOST_ID = com.kich.launcher.data.WidgetHostIds.APPWIDGET_HOST_ID
 
 /** The Activity-owned AppWidgetHost (start/stop tied to the Activity lifecycle); null outside the launcher. */
 val LocalAppWidgetHost = staticCompositionLocalOf<AppWidgetHost?> { null }

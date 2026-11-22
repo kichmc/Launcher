@@ -80,8 +80,15 @@ class HomeLayoutRepository @Inject constructor(
         db.withTransaction { dao.setActiveProfileId(profileId) }
     }
 
-    suspend fun deleteWorkspace(profileId: String) {
-        db.withTransaction { dao.deleteProfile(profileId) }
+    /**
+     * Permanently removes one workspace's rows. Returns the AppWidgetHost ids those rows held so the
+     * caller can free them in the host: the ids are read in the same transaction that deletes the rows,
+     * so none is missed and no other workspace's id is ever included.
+     */
+    suspend fun deleteWorkspace(profileId: String): List<Int> = db.withTransaction {
+        val ids = dao.boundWidgetIdsOfProfile(profileId)
+        dao.deleteProfile(profileId)
+        ids
     }
 
     suspend fun hasWorkspaceLayout(profileId: String): Boolean = dao.profileRowCount(profileId) > 0
@@ -1009,8 +1016,17 @@ class HomeLayoutRepository @Inject constructor(
             val all = dao.getAll()
             val doomed = staleAppRowIds(all) { pkg, serial -> !(pkg == packageName && serial == userSerial) }.toHashSet()
             val widgets = all.filter { it.widgetProvider?.substringBefore('/') == packageName }
-            if (widgets.isNotEmpty() && userSerial == resolver.ownUserSerial()) widgets.mapTo(doomed) { it.id }
-            deleteAndRepairFolders(all, doomed)
+            val ownProfile = userSerial == resolver.ownUserSerial()
+            if (widgets.isNotEmpty() && ownProfile) widgets.mapTo(doomed) { it.id }
+            val removed = deleteAndRepairFolders(all, doomed)
+            // Other AK workspaces may hold widgets (or restored placeholders) of the same provider. The
+            // active workspace was the only one cleaned above, which left dead, unrecoverable widget
+            // cells in the others. Widget rows are always top-level, so no folder repair is needed.
+            val others = if (ownProfile) {
+                dao.inactiveWorkspaceWidgetRows().filter { it.widgetProvider?.substringBefore('/') == packageName }
+            } else emptyList()
+            others.forEach { dao.deleteRowInAnyWorkspace(it.id) }
+            removed + others.size
         }
 
     /**

@@ -1,5 +1,6 @@
 package com.kich.launcher
 
+import com.kich.launcher.feature.settings.label
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -119,9 +120,10 @@ private fun AkProfileSwitcherScreen(
     }
 
     removingId?.let { target ->
-        com.kich.launcher.feature.settings.PinDialog("Enter this workspace’s PIN to remove it", askOld = true, askNew = false, onDismiss = { removingId = null }) { pin, _ ->
+        val method = androidx.compose.runtime.remember(target) { viewModel.lockMethodOf(target) }
+        com.kich.launcher.feature.settings.VerifyLockDialog("Enter this workspace’s ${method.label().lowercase()} to remove it", method, onDismiss = { removingId = null }) { secret ->
             val done = kotlinx.coroutines.CompletableDeferred<String?>()
-            viewModel.deleteAkProfile(target, pin?.copyOf()) { done.complete(com.kich.launcher.feature.settings.pinMessage(it)) }
+            viewModel.deleteAkProfile(target, secret.copyOf()) { done.complete(com.kich.launcher.feature.settings.lockMessage(it, method)) }
             done.await()
         }
     }

@@ -11,6 +11,10 @@
         <item quantity="one">Backup restored — %1$d skipped (not installed)</item>
         <item quantity="other">Backup restored — %1$d skipped (not installed)</item>
     </plurals>
+    <plurals name="backup_widgets_need_setup">
+        <item quantity="one">%1$d widget needs to be set up again — tap its placeholder on the home screen</item>
+        <item quantity="other">%1$d widgets need to be set up again — tap their placeholders on the home screen</item>
+    </plurals>
     <string name="backup_import_invalid">Invalid or incompatible backup file</string>
     <string name="backup_error_too_large">The backup file is too large</string>
     <string name="backup_failed">Operation failed</string>

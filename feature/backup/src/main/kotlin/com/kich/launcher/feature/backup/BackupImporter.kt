@@ -41,7 +41,7 @@ internal class BackupImporter @Inject constructor(
         // restoreDocument writes under NonCancellable: once started, it finishes.
         withContext(Dispatchers.IO) { backupRepository.restoreDocument(doc = doc, installedApps = apps) }
     }.fold(
-        onSuccess = { BackupEvent.Restored(it.restored, it.skipped) },
+        onSuccess = { BackupEvent.Restored(it.restored, it.skipped, it.widgetsNeedSetup) },
         onFailure = {
             if (it is kotlinx.coroutines.CancellationException) throw it
             Log.w(TAG, "File import failed", it)

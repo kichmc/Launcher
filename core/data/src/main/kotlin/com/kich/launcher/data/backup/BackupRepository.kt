@@ -14,7 +14,8 @@ import com.kich.launcher.data.local.HomeItemEntity
 import javax.inject.Inject
 import javax.inject.Singleton
 
-data class RestoreResult(val restored: Int, val skipped: Int)
+/** [widgetsNeedSetup]: restored widget rows. Android widget ids are device-local, so each one comes back as a placeholder to set up again. */
+data class RestoreResult(val restored: Int, val skipped: Int, val widgetsNeedSetup: Int = 0)
 
 @Singleton
 class BackupRepository @Inject constructor(
@@ -91,7 +92,7 @@ class BackupRepository @Inject constructor(
             }
             repinShortcuts(previousLayout, entities)
         } }
-        return RestoreResult(entities.size, mapping.skipped)
+        return RestoreResult(entities.size, mapping.skipped, entities.count { it.widgetProvider != null })
     }
 
     private fun mainUserSerial(): Long = resolver.ownUserSerial() ?: 0L
