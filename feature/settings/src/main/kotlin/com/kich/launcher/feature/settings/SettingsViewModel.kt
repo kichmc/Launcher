@@ -32,6 +32,7 @@ import kotlinx.coroutines.sync.withLock
 import com.kich.launcher.data.AppRepository
 import com.kich.launcher.data.CustomIconStore
 import com.kich.launcher.data.DefaultWorkspaceLayout
+import com.kich.launcher.data.WorkspaceKind
 import com.kich.launcher.data.resolveDefaultDockKeys
 import com.kich.launcher.data.DrawerFolder
 import com.kich.launcher.data.HomeLayoutRepository
@@ -188,14 +189,14 @@ class SettingsViewModel @Inject constructor(
                 saveProfileSnapshot(oldId)
 
                 // Built before the journal opens: a failure here leaves nothing half-switched.
-                val defaultLayout = buildDefaultLayoutPlan()
+                val defaultLayout = buildDefaultLayoutPlan(clean)
                 val id = "ak_" + java.util.UUID.randomUUID().toString().take(8)
                 // No journal, no switch: better to refuse than to risk an unrecoverable half-switch.
                 if (!beginSwitchJournal(oldId, id)) return@withContext
                 // A new workspace starts with the current settings as a useful default, but gets
                 // its own snapshot from the moment it is created.
                 // Its home screen is NOT a copy of the creator's: it gets a fresh default layout
-                // (clock widget, default dock, every other visible app in alphabetical order).
+                // (clock widget, default dock, a prioritised selection of apps and a few folders).
                 // Android widget IDs are device-owned instances, so nothing is cloned that way either.
                 saveProfileSnapshot(id, defaultLayout.home + defaultLayout.dock)
                 try {
@@ -236,7 +237,7 @@ class SettingsViewModel @Inject constructor(
      * already warm (a shared, replaying flow), so the timeout only covers a cold start: without
      * apps the plan is just the clock widget and the workspace is still created.
      */
-    private suspend fun buildDefaultLayoutPlan(): DefaultWorkspaceLayout.Plan {
+    private suspend fun buildDefaultLayoutPlan(workspaceName: String): DefaultWorkspaceLayout.Plan {
         val settings = repository.settings.first()
         val hidden = repository.hiddenApps.first()
         val apps = withTimeoutOrNull(APP_LIST_TIMEOUT_MS) { appRepository.apps.first { it.isNotEmpty() } }
@@ -244,7 +245,14 @@ class SettingsViewModel @Inject constructor(
             .filterNot { it.key in hidden }
         val dockApps = if (apps.isEmpty()) emptyList() else {
             val byKey = apps.associateBy { it.key }
-            withContext(Dispatchers.IO) { resolveDefaultDockKeys(appContext, apps) }.mapNotNull { byKey[it] }
+            withContext(Dispatchers.IO) { resolveDefaultDockKeys(appContext, apps, settingsLast = true) }.mapNotNull { byKey[it] }
+        }
+        // The category each app declares about itself (games, audio, social…); -1 when it declares none.
+        val systemCategories = withContext(Dispatchers.IO) {
+            val pm = appContext.packageManager
+            apps.associate { a ->
+                a.key to (runCatching { pm.getApplicationInfo(a.packageName, 0).category }.getOrDefault(-1))
+            }
         }
         return DefaultWorkspaceLayout.plan(
             apps = apps,
@@ -253,6 +261,8 @@ class SettingsViewModel @Inject constructor(
             rows = settings.homeRows,
             dockColumns = settings.dockColumns,
             smartspaceSpanY = DefaultWorkspaceLayout.SMARTSPACE_SPAN_Y,
+            kind = WorkspaceKind.fromName(workspaceName),
+            systemCategories = systemCategories,
         )
     }
 

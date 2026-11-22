@@ -10,11 +10,10 @@ import android.provider.Telephony
 import com.kich.launcher.model.AppItem
 
 /**
- * The first-run default dock, in the user-chosen order: phone, messages, system Settings,
- * browser, camera. Each slot resolves the device's DEFAULT handler and is silently skipped when
+ * The default dock. First-run order (user-chosen): phone, messages, system Settings, browser, camera. Each slot resolves the device's DEFAULT handler and is silently skipped when
  * nothing resolves (e.g. a tablet without telephony), so the seed degrades gracefully.
  */
-fun resolveDefaultDockKeys(context: Context, apps: List<AppItem>): List<String> {
+fun resolveDefaultDockKeys(context: Context, apps: List<AppItem>, settingsLast: Boolean = false): List<String> {
     val pm = context.packageManager
 
     /** The default handler's (package, activity); the activity tells the handler's entries apart. */
@@ -24,13 +23,15 @@ fun resolveDefaultDockKeys(context: Context, apps: List<AppItem>): List<String> 
             // "android" is the chooser/resolver — there is no single default app to pin.
             ?.takeIf { it.first != "android" }
 
-    val slots = listOf(
-        defaultFor(Intent(Intent.ACTION_DIAL)),
-        runCatching { Telephony.Sms.getDefaultSmsPackage(context) }.getOrNull()?.let { it to null },
-        defaultFor(Intent(Settings.ACTION_SETTINGS)),
-        defaultFor(Intent(Intent.ACTION_VIEW, Uri.parse("http://www.example.com"))),
-        defaultFor(Intent(MediaStore.INTENT_ACTION_STILL_IMAGE_CAMERA)),
-    )
+    val phone = defaultFor(Intent(Intent.ACTION_DIAL))
+    val sms = runCatching { Telephony.Sms.getDefaultSmsPackage(context) }.getOrNull()?.let { it to null }
+    val settings = defaultFor(Intent(Settings.ACTION_SETTINGS))
+    val browser = defaultFor(Intent(Intent.ACTION_VIEW, Uri.parse("http://www.example.com")))
+    val camera = defaultFor(Intent(MediaStore.INTENT_ACTION_STILL_IMAGE_CAMERA))
+    // First-run order is phone, messages, Settings, browser, camera. [settingsLast] (new workspaces)
+    // puts Settings after camera so a short dock keeps phone, messages, browser and camera.
+    val slots = if (settingsLast) listOf(phone, sms, browser, camera, settings)
+    else listOf(phone, sms, settings, browser, camera)
     return slots
         .mapNotNull { slot ->
             slot?.let { (p, activity) ->

@@ -84,7 +84,7 @@ data class WidgetResizeRange(
     val isResizable: Boolean get() = horizontal || vertical
 }
 
-/** Resize limits for [info]: min/max cells per axis (provider min/maxResize + grid), allowed axes. */
+/** Resize limits for [info]: min/max cells per axis (provider min/maxResize + grid); both axes are always allowed. */
 fun widgetResizeRange(
     info: AppWidgetProviderInfo,
     context: Context,
@@ -105,8 +105,12 @@ fun widgetResizeRange(
     )
     val maxX = maximumWidgetCells(if (Build.VERSION.SDK_INT >= 31) info.maxResizeWidth / density else 0f, cellWidthDp, gridColumns, insetXDp)
     val maxY = maximumWidgetCells(if (Build.VERSION.SDK_INT >= 31) info.maxResizeHeight / density else 0f, cellHeightDp, rows, insetYDp)
-    val horizontal = info.resizeMode and AppWidgetProviderInfo.RESIZE_HORIZONTAL != 0
-    val vertical = info.resizeMode and AppWidgetProviderInfo.RESIZE_VERTICAL != 0
+    // Every widget can be resized on both axes, even when its provider declares resizeMode "none"
+    // (the provider's flags are ignored on purpose). A widget that declares no resize minimum keeps
+    // its own minimum size as the floor, so it can only grow; the system still redraws it through the
+    // usual size options. The grid limits (minX <= maxX) still apply.
+    val horizontal = true
+    val vertical = true
     return WidgetResizeRange(
         minX = minX,
         minY = minY,

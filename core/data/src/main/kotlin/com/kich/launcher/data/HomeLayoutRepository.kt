@@ -83,6 +83,13 @@ class HomeLayoutRepository @Inject constructor(
     suspend fun initializeDefaultLayout(plan: DefaultWorkspaceLayout.Plan): Boolean = db.withTransaction {
         if (dao.getAllOnce().isNotEmpty()) return@withTransaction false
         (plan.home + plan.dock).forEach { insertActive(it.copy(id = 0L)) }
+        // A folder is a home row whose id its children point at (children: page 0, cellX = order).
+        plan.folders.forEach { f ->
+            val folderId = insertActive(
+                HomeItemEntity(containerId = HOME, folderName = f.name, page = f.page, cellX = f.cellX, cellY = f.cellY),
+            )
+            f.apps.forEachIndexed { order, app -> insertActive(homeApp(app, folderId, 0, order, 0)) }
+        }
         true
     }
 

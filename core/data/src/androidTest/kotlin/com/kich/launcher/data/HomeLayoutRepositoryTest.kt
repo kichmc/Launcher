@@ -404,13 +404,16 @@ class HomeLayoutRepositoryTest {
 
     @Test
     fun initializeDefaultLayout_fills_only_an_empty_workspace_and_stays_in_it() = runTest {
-        val apps = (1..10).map { app("p$it") }
-        val plan = DefaultWorkspaceLayout.plan(apps, apps.take(2), 4, 6, 4, 2)
+        val names = listOf("com.whatsapp", "org.telegram.messenger", "com.instagram.android", "com.facebook.katana", "com.snapchat.android", "com.spotify.music", "com.android.chrome", "com.google.android.dialer")
+        val apps = names.map { app(it) }
+        val plan = DefaultWorkspaceLayout.plan(apps, apps.takeLast(2), 4, 6, 4, 2)
+        assertThat(plan.folders).isNotEmpty() // the three social apps form a folder
 
         repo.setActiveWorkspace("ak_one")
         assertThat(repo.initializeDefaultLayout(plan)).isTrue()
         val first = repo.snapshotLayout()
-        assertThat(first).hasSize(plan.home.size + plan.dock.size)
+        val folderChildren = plan.folders.sumOf { it.apps.size }
+        assertThat(first).hasSize(plan.home.size + plan.dock.size + plan.folders.size + folderChildren)
         assertThat(first.map { it.profileId }.toSet()).containsExactly("ak_one")
 
         // A second call (or a user-arranged workspace) is refused and changes nothing.

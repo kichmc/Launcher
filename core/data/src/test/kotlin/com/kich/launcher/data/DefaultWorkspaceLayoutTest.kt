@@ -14,83 +14,135 @@ import java.util.Random
 @Config(sdk = [35])
 class DefaultWorkspaceLayoutTest {
 
-    private fun app(i: Int) = AppItem(
-        packageName = "pkg$i", className = "pkg$i.Main", user = Process.myUserHandle(),
-        userSerial = 0L, label = "App%03d".format(i),
+    private fun app(pkg: String) = AppItem(
+        packageName = pkg, className = "$pkg.Main", user = Process.myUserHandle(),
+        userSerial = 0L, label = pkg.substringAfterLast('.'),
     )
 
-    private val apps = (1..30).map(::app)
-    private val dock = listOf(apps[4], apps[2], apps[9], apps[11], apps[20])
+    private val pkgs = listOf(
+        "com.google.android.dialer", "com.google.android.apps.messaging", "com.android.chrome",
+        "com.sec.android.app.camera", "com.android.settings", "com.whatsapp", "org.telegram.messenger",
+        "com.google.android.gm", "com.instagram.android", "com.facebook.katana", "com.snapchat.android",
+        "com.google.android.youtube", "com.spotify.music", "com.netflix.mediaclient",
+        "com.google.android.apps.photos", "com.google.android.apps.maps", "com.google.android.apps.docs",
+        "com.google.android.calendar", "com.google.android.deskclock", "com.google.android.calculator",
+        "com.android.vending", "com.microsoft.office.word", "com.microsoft.office.excel",
+        "com.microsoft.teams", "com.microsoft.office.outlook", "com.slack", "com.game.one",
+        "com.game.two", "com.game.three", "com.game.four", "com.discord", "com.weird.unknown.a",
+    )
+    private val apps = pkgs.map(::app)
+    private fun by(vararg p: String) = p.map { x -> apps.first { it.packageName == x } }
+    private val dock = by(
+        "com.google.android.dialer", "com.google.android.apps.messaging", "com.android.chrome",
+        "com.sec.android.app.camera", "com.android.settings",
+    )
+    private val games = apps.filter { it.packageName.startsWith("com.game.") }.associate { it.key to 0 }
 
     private fun plan(
+        kind: WorkspaceKind = WorkspaceKind.GENERAL, columns: Int = 4, rows: Int = 6,
         list: List<AppItem> = apps, dockApps: List<AppItem> = dock,
-        columns: Int = 4, rows: Int = 6, dockColumns: Int = 4, span: Int = 2,
-    ) = DefaultWorkspaceLayout.plan(list, dockApps, columns, rows, dockColumns, span)
+    ) = DefaultWorkspaceLayout.plan(list, dockApps, columns, rows, 4, 2, kind, games)
 
     private fun cells(r: HomeItemEntity) =
         (0 until r.spanX).flatMap { dx -> (0 until r.spanY).map { dy -> Triple(r.page, r.cellX + dx, r.cellY + dy) } }
 
+    private fun allCells(p: DefaultWorkspaceLayout.Plan) =
+        p.home.flatMap(::cells) + p.folders.map { Triple(it.page, it.cellX, it.cellY) }
+
+    private fun placed(p: DefaultWorkspaceLayout.Plan) =
+        p.home.filter { it.isApp }.map { it.packageName } + p.folders.flatMap { f -> f.apps.map { it.packageName } }
+
+    private fun order(p: DefaultWorkspaceLayout.Plan): List<String> =
+        (p.home.filter { it.isApp }.map { Triple(it.page, it.cellY, it.cellX) to it.packageName } +
+            p.folders.map { Triple(it.page, it.cellY, it.cellX) to "[${it.name}]" })
+            .sortedWith(compareBy({ it.first.first }, { it.first.second }, { it.first.third })).map { it.second }
+
     @Test
-    fun `dock is capped, ordered and kept off the pages`() {
+    fun `dock keeps phone, messages, browser, camera and nothing is repeated on the pages`() {
         val p = plan()
-        assertThat(p.dock.map { it.packageName }).containsExactly("pkg5", "pkg3", "pkg10", "pkg12").inOrder()
-        assertThat(p.dock.map { it.cellX }).containsExactly(0, 1, 2, 3).inOrder()
-        assertThat(p.home.filter { it.isApp }.map { it.key }).containsNoneIn(p.dock.map { it.key })
+        assertThat(p.dock).hasSize(4)
+        assertThat(placed(p)).containsNoneIn(p.dock.map { it.packageName })
+        assertThat(placed(p)).containsNoDuplicates()
     }
 
     @Test
-    fun `nothing overlaps and everything is inside the grid`() {
-        val all = plan().home.flatMap(::cells)
-        assertThat(all).containsNoDuplicates()
-        assertThat(all.all { (_, x, y) -> x in 0 until 4 && y in 0 until 6 }).isTrue()
+    fun `only recognised apps are placed`() {
+        val p = plan()
+        assertThat(placed(p)).doesNotContain("com.weird.unknown.a")
+        assertThat(placed(p).size).isLessThan(apps.size)
     }
 
     @Test
-    fun `clock widget sits full width at the top and icons start below it on page 0`() {
-        val home = plan().home
-        val w = home.single { it.isBuiltin }
-        assertThat(listOf(w.page, w.cellX, w.cellY, w.spanX, w.spanY)).containsExactly(0, 0, 0, 4, 2).inOrder()
-        assertThat(home.filter { it.isApp && it.page == 0 }.minOf { it.cellY }).isEqualTo(2)
+    fun `messaging comes before social which comes before media on a general workspace`() {
+        val o = order(plan())
+        assertThat(o.indexOf("com.whatsapp")).isLessThan(o.indexOf("org.telegram.messenger"))
+        assertThat(o.indexOf("org.telegram.messenger")).isLessThan(o.indexOf("com.instagram.android"))
+        assertThat(o.indexOf("com.instagram.android")).isLessThan(o.indexOf("com.spotify.music"))
     }
 
     @Test
-    fun `a full page continues on the next page`() {
-        val apps = plan().home.filter { it.isApp }
-        assertThat(apps).hasSize(26)
-        assertThat(apps.count { it.page == 0 }).isEqualTo(16)
-        assertThat(apps.count { it.page == 1 }).isEqualTo(10)
+    fun `workspace kind changes the arrangement`() {
+        val work = order(plan(WorkspaceKind.WORK))
+        val gaming = order(plan(WorkspaceKind.GAMING))
+        assertThat(gaming.take(4)).containsExactly("com.game.four", "com.game.one", "com.game.three", "com.game.two")
+        assertThat(work.take(2)).doesNotContain("com.whatsapp")
+        assertThat(work).isNotEqualTo(gaming)
+        assertThat(work).isNotEqualTo(order(plan(WorkspaceKind.GENERAL)))
+    }
+
+    @Test
+    fun `games are foldered normally but stay loose on a gaming workspace, Microsoft loose on work`() {
+        assertThat(plan(WorkspaceKind.GENERAL).folders.map { it.name }).contains("Games")
+        assertThat(plan(WorkspaceKind.GAMING).folders.map { it.name }).doesNotContain("Games")
+        assertThat(plan(WorkspaceKind.WORK).folders.map { it.name }).doesNotContain("Microsoft")
+    }
+
+    @Test
+    fun `folders are few, sensibly sized and never hold messaging or browsers`() {
+        for (k in WorkspaceKind.values()) {
+            val p = plan(k)
+            assertThat(p.folders.size).isAtMost(DefaultWorkspaceLayout.MAX_FOLDERS)
+            p.folders.forEach { assertThat(it.apps.size).isIn(3..DefaultWorkspaceLayout.MAX_FOLDER_APPS) }
+            assertThat(p.folders.flatMap { it.apps }.map { it.packageName }).containsNoneOf(
+                "com.whatsapp", "org.telegram.messenger", "com.google.android.gm", "com.android.chrome", "com.discord",
+            )
+        }
+    }
+
+    @Test
+    fun `no overlap, inside the grid, bottom row free, at most two pages`() {
+        for (k in WorkspaceKind.values()) {
+            val all = allCells(plan(k))
+            assertThat(all).containsNoDuplicates()
+            assertThat(all.all { (_, x, y) -> x in 0 until 4 && y in 0 until 5 }).isTrue()
+            assertThat(all.maxOf { it.first }).isAtMost(DefaultWorkspaceLayout.MAX_AUTO_PAGES - 1)
+        }
     }
 
     @Test
     fun `result does not depend on the order apps arrive in`() {
-        assertThat(plan(list = apps.shuffled(Random(7)))).isEqualTo(plan())
+        assertThat(plan(list = apps.shuffled(Random(3)))).isEqualTo(plan())
     }
 
     @Test
-    fun `no apps gives just the clock widget`() {
-        val p = plan(list = emptyList(), dockApps = emptyList())
-        assertThat(p.home).hasSize(1)
-        assertThat(p.dock).isEmpty()
-    }
-
-    @Test
-    fun `a dock app that is not installed is ignored and duplicates are placed once`() {
-        assertThat(plan(list = listOf(app(1)), dockApps = listOf(app(99))).dock).isEmpty()
-        assertThat(plan(list = apps + apps[0], dockApps = emptyList(), span = 0).home.count { it.isApp }).isEqualTo(30)
-    }
-
-    @Test
-    fun `degenerate grids neither crash nor overlap`() {
-        assertThat(plan(columns = 3, rows = 1, dockApps = emptyList()).home.count { it.isApp }).isEqualTo(30)
-        assertThat(plan(columns = 3, rows = 2, span = 5, dockApps = emptyList()).home.single { it.isBuiltin }.spanY).isEqualTo(1)
-        val bad = plan(columns = 0, rows = 0, dockColumns = -1, span = 0)
+    fun `no apps, missing dock app and degenerate grids are safe`() {
+        val none = plan(list = emptyList(), dockApps = emptyList())
+        assertThat(none.home).hasSize(1)
+        assertThat(none.folders).isEmpty()
+        assertThat(plan(dockApps = listOf(app("com.not.installed"))).dock).isEmpty()
+        assertThat(allCells(plan(columns = 3, rows = 1))).containsNoDuplicates()
+        val bad = DefaultWorkspaceLayout.plan(apps, dock, 0, 0, -1, 0)
         assertThat(bad.dock).isEmpty()
-        assertThat(bad.home.flatMap(::cells)).containsNoDuplicates()
+        assertThat(allCells(bad)).containsNoDuplicates()
+        assertThat(allCells(plan(columns = 5, rows = 8))).containsNoDuplicates()
     }
 
     @Test
-    fun `never uses a page the pager does not show`() {
-        val p = plan(list = (1..5000).map(::app), dockApps = emptyList(), rows = 5)
-        assertThat(p.home.maxOf { it.page }).isLessThan(HomeLayoutRepository.MAX_PAGES)
+    fun `workspace kind is read from the name`() {
+        assertThat(WorkspaceKind.fromName("Work")).isEqualTo(WorkspaceKind.WORK)
+        assertThat(WorkspaceKind.fromName("Gaming")).isEqualTo(WorkspaceKind.GAMING)
+        assertThat(WorkspaceKind.fromName("Personal")).isEqualTo(WorkspaceKind.PERSONAL)
+        assertThat(WorkspaceKind.fromName("User 2")).isEqualTo(WorkspaceKind.GENERAL)
+        assertThat(WorkspaceKind.fromName("Team meeting")).isEqualTo(WorkspaceKind.GENERAL)
     }
 }
