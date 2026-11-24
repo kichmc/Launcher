@@ -961,4 +961,49 @@ class SettingsRepositoryTest {
         assertThat(settings.drawerLabelColor).isEqualTo(0xFFFFFFFF.toInt())
         assertThat(settings.dockBackgroundOpacity).isEqualTo(0.35f) // not a number: dropped, the default is back
     }
+
+    /** What a workspace switch does: save the outgoing settings, import the incoming snapshot. Each
+     *  workspace therefore keeps its own hidden-app list, and a workspace with none comes back empty. */
+    @Test
+    fun hiddenAppsFollowTheWorkspaceSnapshotsAndNeverLeakBetweenWorkspaces() = runTest {
+        val repo = newRepository()
+
+        // Workspace A (live): Instagram and Discord hidden.
+        repo.setAppHidden("com.instagram.android", true)
+        repo.setAppHidden("com.discord", true)
+        val snapshotA = repo.exportRaw(includeLocalImages = true, includeAppUsage = true)
+
+        // Switch to B, which was saved with only WhatsApp hidden.
+        val b = newRepository()
+        b.setAppHidden("com.whatsapp", true)
+        val snapshotB = b.exportRaw(includeLocalImages = true, includeAppUsage = true)
+        repo.importRaw(snapshotB, preserveLocalImages = false, preserveAppUsage = false)
+        assertThat(repo.hiddenApps.first()).containsExactly("com.whatsapp")
+
+        // Switch to C, saved with nothing hidden (the key is absent): the live list must come back empty.
+        val c = newRepository()
+        val snapshotC = c.exportRaw(includeLocalImages = true, includeAppUsage = true)
+        repo.importRaw(snapshotC, preserveLocalImages = false, preserveAppUsage = false)
+        assertThat(repo.hiddenApps.first()).isEmpty()
+
+        // Back to A and B: exactly as they were left.
+        repo.importRaw(snapshotA, preserveLocalImages = false, preserveAppUsage = false)
+        assertThat(repo.hiddenApps.first()).containsExactly("com.instagram.android", "com.discord")
+        repo.importRaw(snapshotB, preserveLocalImages = false, preserveAppUsage = false)
+        assertThat(repo.hiddenApps.first()).containsExactly("com.whatsapp")
+
+        // Unhiding in one workspace leaves a saved snapshot of another alone.
+        repo.setAppHidden("com.whatsapp", false)
+        assertThat(repo.hiddenApps.first()).isEmpty()
+        repo.importRaw(snapshotA, preserveLocalImages = false, preserveAppUsage = false)
+        assertThat(repo.hiddenApps.first()).containsExactly("com.instagram.android", "com.discord")
+    }
+
+    @Test
+    fun clearHiddenAppsEmptiesTheActiveWorkspaceList() = runTest {
+        val repo = newRepository()
+        repo.setAppHidden("com.instagram.android", true)
+        repo.clearHiddenApps()
+        assertThat(repo.hiddenApps.first()).isEmpty()
+    }
 }

@@ -66,10 +66,11 @@ class DefaultWorkspaceLayoutTest {
     }
 
     @Test
-    fun `only recognised apps are placed`() {
+    fun `unrecognised apps follow the recognised ones`() {
         val p = plan()
-        assertThat(placed(p)).doesNotContain("com.weird.unknown.a")
-        assertThat(placed(p).size).isLessThan(apps.size)
+        assertThat(placed(p)).contains("com.weird.unknown.a")
+        val o = order(p)
+        assertThat(o.indexOf("com.weird.unknown.a")).isGreaterThan(o.indexOf("com.whatsapp"))
     }
 
     @Test
@@ -110,13 +111,28 @@ class DefaultWorkspaceLayoutTest {
     }
 
     @Test
-    fun `no overlap, inside the grid, bottom row free, at most two pages`() {
+    fun `no overlap, inside the grid, within the page limit`() {
         for (k in WorkspaceKind.values()) {
             val all = allCells(plan(k))
             assertThat(all).containsNoDuplicates()
-            assertThat(all.all { (_, x, y) -> x in 0 until 4 && y in 0 until 5 }).isTrue()
+            assertThat(all.all { (_, x, y) -> x in 0 until 4 && y in 0 until 6 }).isTrue()
             assertThat(all.maxOf { it.first }).isAtMost(DefaultWorkspaceLayout.MAX_AUTO_PAGES - 1)
         }
+    }
+
+    @Test
+    fun `a full home fills whole pages and puts Samsung extras in a Samsung folder`() {
+        val extras = listOf("shop", "wear", "galaxystore", "mygalaxy").map { app("com.samsung.android.$it") }
+        val known = listOf("com.samsung.android.calendar", "com.sec.android.app.clockpackage").map(::app)
+        val many = (1..40).map { app("com.vendor.app$it") }
+        val p = plan(list = many + extras + known + apps, dockApps = emptyList())
+        assertThat(p.folders.map { it.name }).contains("Samsung")
+        assertThat(p.home.map { it.packageName }).containsAtLeast("com.samsung.android.calendar", "com.sec.android.app.clockpackage")
+        assertThat(p.folders.first { it.name == "Samsung" }.apps.map { it.packageName }).containsNoneOf("com.samsung.android.calendar", "com.sec.android.app.clockpackage")
+        // page 0: 4 rows under the widget, 4 columns = 16 slots, all used
+        assertThat(p.home.count { it.isApp && it.page == 0 } + p.folders.count { it.page == 0 }).isEqualTo(16)
+        assertThat(allCells(p)).containsNoDuplicates()
+        assertThat(allCells(p).maxOf { it.first }).isEqualTo(DefaultWorkspaceLayout.MAX_AUTO_PAGES - 1)
     }
 
     @Test

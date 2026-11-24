@@ -12,11 +12,11 @@ import com.kich.launcher.model.AppItem
  * [HomeLayoutRepository.initializeDefaultLayout] stores it. It works on the live grid (columns × rows).
  *
  *  - Page 0 starts with the built-in clock/date widget; the dock gets [dockApps] (not repeated on pages).
- *  - Apps are NOT all placed: only recognised, useful ones, ordered by category priority for the
- *    workspace kind (see [AppCategorizer.priority]) and, inside a category, by the categorizer's list
- *    order. Unrecognised apps stay in the drawer. At most [MAX_AUTO_PAGES] pages are filled, and every
- *    page keeps its bottom row empty so nothing is crammed.
- *  - Related apps are folded into at most [MAX_FOLDERS] folders (Google, Microsoft, Games, Social, Media),
+ *  - Apps are ordered by category priority for the workspace kind (see [AppCategorizer.priority]) and,
+ *    inside a category, by the categorizer's list order; apps it does not recognise follow, alphabetically.
+ *    Pages are filled completely, like a One UI home, up to [MAX_AUTO_PAGES] pages; anything beyond that
+ *    stays in the drawer.
+ *  - Related apps are folded into at most [MAX_FOLDERS] folders (Google, Samsung, Microsoft, Games, Social, Media),
  *    only when a group has [MIN_FOLDER_APPS]+ apps; a folder holds at most [MAX_FOLDER_APPS]. Messaging and
  *    browsers are never foldered, and a group that is the workspace's main focus (Games on a gaming
  *    workspace, Microsoft on a work one) stays loose.
@@ -24,8 +24,8 @@ import com.kich.launcher.model.AppItem
 object DefaultWorkspaceLayout {
 
     const val SMARTSPACE_SPAN_Y = 2
-    const val MAX_AUTO_PAGES = 2
-    const val MAX_FOLDERS = 3
+    const val MAX_AUTO_PAGES = 4
+    const val MAX_FOLDERS = 4
     const val MIN_FOLDER_APPS = 3
     const val MAX_FOLDER_APPS = 8
 
@@ -42,6 +42,11 @@ object DefaultWorkspaceLayout {
 
     private val groups = listOf(
         Group("Google", null) { a, _ -> a.packageName.startsWith("com.google.android.apps.") || a.packageName in GOOGLE_EXACT },
+        // Samsung's own extras (Shop, Wear, Galaxy…) like a One UI phone's "Samsung" folder; Samsung apps the
+        // categorizer already knows (Calendar, Clock, Notes, Contacts…) stay loose.
+        Group("Samsung", null) { a, c ->
+            c == AppCategory.OTHER && (a.packageName.startsWith("com.samsung.") || a.packageName.startsWith("com.sec."))
+        },
         Group("Microsoft", WorkspaceKind.WORK) { a, _ -> a.packageName.startsWith("com.microsoft.") },
         Group("Games", WorkspaceKind.GAMING) { _, c -> c == AppCategory.GAMES },
         Group("Social", null) { _, c -> c == AppCategory.SOCIAL },
@@ -89,7 +94,6 @@ object DefaultWorkspaceLayout {
                 val cat = AppCategorizer.categoryOf(a.packageName, systemCategories[a.key] ?: -1)
                 Cand(a, cat, order.indexOf(cat), AppCategorizer.ruleIndex(a.packageName))
             }
-            .filter { it.category != AppCategory.OTHER }
             .sortedWith(compareBy({ it.catRank }, { it.rule }, { it.app.label.lowercase() }, { it.app.key }))
             .toList()
 
@@ -124,8 +128,7 @@ object DefaultWorkspaceLayout {
         for (page in 0 until MAX_AUTO_PAGES) {
             if (!HomeLayoutRepository.isShownPage(page)) break
             val firstRow = if (page == 0) widgetRows else 0
-            val usableRows = (rws - firstRow - 1).coerceAtLeast(1).coerceAtMost(rws - firstRow)
-            for (y in firstRow until firstRow + usableRows) for (x in 0 until cols) {
+            for (y in firstRow until rws) for (x in 0 until cols) {
                 if (index >= items.size) break
                 val it = items[index++]
                 if (it.app != null) {

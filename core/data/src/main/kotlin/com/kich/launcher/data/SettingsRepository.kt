@@ -306,6 +306,9 @@ class SettingsRepository @Inject constructor(
         p[Keys.HIDDEN_APPS] = current.joinToString("\n")
     }
 
+    /** Empties the hidden-app list of the active workspace (a new workspace starts with nothing hidden). */
+    suspend fun clearHiddenApps() = edit { p -> p.remove(Keys.HIDDEN_APPS) }
+
     /** User-chosen custom app labels (AppItem.key -> label), applied over the system label. */
     val customLabels: Flow<Map<String, String>> = dataStore.data.map { p -> parseLabels(p[Keys.CUSTOM_LABELS]) }
 

@@ -130,6 +130,7 @@ internal fun FolderCard(
     onAppClick: (AppItem) -> Unit,
     onRenameApp: (AppItem) -> Unit,
     onRemoveFromFolder: (AppItem) -> Unit,
+    onHideApp: (AppItem) -> Unit,
     onPinShortcut: (AppShortcuts.Item) -> Unit,
     /** Release inside the grid at a new slot: [before] is the visible app that will follow, null = last. */
     onReorder: (app: AppItem, before: AppItem?) -> Unit,
@@ -538,6 +539,7 @@ internal fun FolderCard(
                 PopupAction(stringResource(R.string.app_info), LauncherIcons.Info) { AppActions.openAppInfo(context, app) },
                 PopupAction(stringResource(R.string.rename), LauncherIcons.Edit) { onRenameApp(app) },
                 PopupAction(stringResource(R.string.folder_remove_app), LauncherIcons.Close) { onRemoveFromFolder(app) },
+                PopupAction(stringResource(R.string.home_hide_app), LauncherIcons.VisibilityOff) { onHideApp(app) },
                 PopupAction(stringResource(R.string.uninstall), LauncherIcons.Delete) { AppActions.uninstall(context, app) },
             ),
             onDismiss = { menu = null },

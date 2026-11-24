@@ -374,14 +374,19 @@ class HomeViewModel @Inject constructor(
 
     val uiState: StateFlow<HomeUiState> = combine(
         settingsRepository.settings,
-        appRepository.apps,
+        // The installed apps with this workspace's hidden-app list, so hidden ones drop out of home below.
+        appRepository.apps.combine(settingsRepository.hiddenApps) { all, hidden -> all to hidden },
         // A new cache generation re-runs this with the same rows, re-resolving what was invalidated.
         homeLayoutRepository.homeItems.combine(shortcutCache.generation) { items, _ -> items }
             .combine(settingsRepository.folderIcons) { items, icons -> items to icons }
             .combine(settingsRepository.shortcutIcons) { (items, folderIcons), shortcutIcons -> Triple(items, folderIcons, shortcutIcons) },
         notificationBadgeRepository.badges,
         settingsRepository.swipeUpApps,
-    ) { settings, apps, (homeItems, folderIcons, shortcutIcons), badges, swipeUpApps ->
+    ) { settings, (allApps, hidden), (homeItems, folderIcons, shortcutIcons), badges, swipeUpApps ->
+        // A hidden app is not shown on home, in the dock or in a folder of this workspace (its rows are
+        // kept, so unhiding restores it where it was). Gesture targets the user picked still resolve.
+        val allByKey = allApps.associateBy { it.key }
+        val apps = allApps.filterNot { it.key in hidden }
         val byKey = apps.associateBy { it.key }
         // Children grouped by their folder id, kept in stored order.
         val childrenByFolder = homeItems
@@ -498,7 +503,7 @@ class HomeViewModel @Inject constructor(
             homePage = settings.homePage.coerceIn(0, pageCount - 1),
             occupiedPages = occupied,
             badges = badges,
-            swipeUpTargets = resolveSwipeUpTargets(swipeUpApps, byKey),
+            swipeUpTargets = resolveSwipeUpTargets(swipeUpApps, allByKey),
             loaded = true,
         )
     }.stateIn(
@@ -667,6 +672,13 @@ class HomeViewModel @Inject constructor(
     fun removeFromHome(appItem: AppItem) =
         viewModelScope.launch { homeLayoutRepository.removeFromHome(appItem) }
 
+    /**
+     * Hides [appItem] in the active workspace. Hidden apps are part of each workspace's own settings, so
+     * other workspaces are unaffected. Only the flag changes: the home, dock and folder rows stay, and
+     * the icon is just not shown (see [uiState]), so unhiding puts it back in the same place.
+     */
+    fun hideApp(appItem: AppItem) = viewModelScope.launch { settingsRepository.setAppHidden(appItem.key, true) }
+
     fun addToDock(appItem: AppItem) =
         viewModelScope.launch { homeLayoutRepository.addToDock(appItem) }
 
@@ -678,7 +690,10 @@ class HomeViewModel @Inject constructor(
         viewModelScope.launch { homeLayoutRepository.removeFromDock(appItem) }
 
     /** The keys the dock shows (its rows that resolve), for a drop index counted over shown slots. */
-    private suspend fun shownDockKeys(): Set<String> = appRepository.apps.first().mapTo(HashSet()) { it.key }
+    private suspend fun shownDockKeys(): Set<String> {
+        val hidden = settingsRepository.hiddenApps.first()
+        return appRepository.apps.first().mapNotNullTo(HashSet()) { it.key.takeUnless { k -> k in hidden } }
+    }
 
     /** The home_items container the dragged app's row is in, for a drop onto a dock app or folder:
      *  null for the drawer (no row). [openFolderId] is the folder whose card the drag left, if any. */

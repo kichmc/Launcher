@@ -174,37 +174,52 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
-    fun createAkProfile(name: String) {
+    /** [onResult] gets null on success, otherwise a short reason the workspace was not created. */
+    fun createAkProfile(name: String, onResult: (String?) -> Unit = {}) {
         val clean = name.trim().take(24)
-        if (clean.isBlank()) return
+        if (clean.isBlank()) { onResult("Enter a name"); return }
+        // One creation at a time, process-wide: a double tap, a second tile launch or the Settings screen
+        // running at once must not create two workspaces from one intent.
+        if (!creationInFlight.compareAndSet(false, true)) { onResult("A workspace is already being created"); return }
         viewModelScope.launch {
+          try {
             profileMutex.withLock { withContext(NonCancellable) {
                 refreshProfiles()
-                if (_profiles.value.size >= 5) return@withContext
+                if (_profiles.value.size >= 5) { onResult("Up to 5 workspaces"); return@withContext }
                 // A locked workspace must not be cloned (layout, hidden apps, settings) into a new,
                 // unlocked one by anyone who can reach the Quick Settings switcher without its PIN.
-                if (lockManager.isLocked()) return@withContext
+                if (lockManager.isLocked()) { onResult("Unlock this workspace first"); return@withContext }
                 val oldId = activeProfileId()
                 val originalLayout = homeLayoutRepository.snapshotLayout()
                 saveProfileSnapshot(oldId)
 
                 // Built before the journal opens: a failure here leaves nothing half-switched.
-                val defaultLayout = buildDefaultLayoutPlan(clean)
+                // A planner failure must never stop the workspace from being created: fall back to an empty home.
+                val defaultLayout = runCatching { buildDefaultLayoutPlan(clean) }
+                    .onFailure { android.util.Log.e(TAG, "Default layout planning failed", it) }
+                    .getOrDefault(DefaultWorkspaceLayout.Plan(emptyList(), emptyList(), emptyList()))
                 val id = "ak_" + java.util.UUID.randomUUID().toString().take(8)
                 // No journal, no switch: better to refuse than to risk an unrecoverable half-switch.
-                if (!beginSwitchJournal(oldId, id)) return@withContext
+                if (!beginSwitchJournal(oldId, id)) { onResult("Could not start creating the workspace"); return@withContext }
                 // A new workspace starts with the current settings as a useful default, but gets
                 // its own snapshot from the moment it is created.
                 // Its home screen is NOT a copy of the creator's: it gets a fresh default layout
                 // (clock widget, default dock, a prioritised selection of apps and a few folders).
                 // Android widget IDs are device-owned instances, so nothing is cloned that way either.
-                saveProfileSnapshot(id, defaultLayout.home + defaultLayout.dock)
+                saveProfileSnapshot(id, defaultLayout.home + defaultLayout.dock, withoutSettings = setOf("hidden_apps"))
                 try {
                     homeLayoutRepository.setActiveWorkspace(id)
                     // Refuses (false) unless the new partition is still empty, so the defaults can
                     // never land on top of existing rows.
-                    check(homeLayoutRepository.initializeDefaultLayout(defaultLayout)) {
-                        "New AK workspace partition was not empty"
+                    // If storing the default layout fails (it is one transaction, so nothing is left behind),
+                    // still create the workspace, with an empty home, instead of failing the whole creation.
+                    val stored = runCatching { homeLayoutRepository.initializeDefaultLayout(defaultLayout) }
+                        .onFailure { android.util.Log.e(TAG, "Storing default layout failed", it) }
+                        .getOrDefault(false)
+                    if (!stored) {
+                        check(homeLayoutRepository.initializeDefaultLayout(DefaultWorkspaceLayout.Plan(emptyList(), emptyList(), emptyList()))) {
+                            "New AK workspace partition was not empty"
+                        }
                     }
                     profilePrefs.edit().putBoolean("layout_partitioned_$id", true).commit()
                     val updated = _profiles.value.map { it.copy(active = false) } +
@@ -214,10 +229,16 @@ class SettingsViewModel @Inject constructor(
                         ProfileLockManager.markerClearedEditor(profilePrefs.edit().putString("active", id))
                             .remove(KEY_SWITCH_JOURNAL).commit()
                     })
-                    drawerWallpaper.reloadForActiveProfile()
-                    refreshMotivationWidget()
+                    // The new workspace is committed. It starts with nothing hidden (hiding is per workspace:
+                    // it must not inherit the creator's list), and nothing below may undo the creation.
+                    runCatching { repository.clearHiddenApps() }.onFailure { android.util.Log.e(TAG, "Clearing hidden apps failed", it) }
+                    runCatching { drawerWallpaper.reloadForActiveProfile() }
+                    runCatching { refreshMotivationWidget() }
                     refreshProfiles()
-                } catch (_: Exception) {
+                    onResult(null)
+                } catch (e: Exception) {
+                    android.util.Log.e(TAG, "Creating AK workspace failed", e)
+                    onResult("Could not create the workspace (${e.javaClass.simpleName}: ${e.message?.take(60)})")
                     runCatching { homeLayoutRepository.setActiveWorkspace(oldId) }
                     runCatching { homeLayoutRepository.deleteWorkspace(id) }
                     runCatching { homeLayoutRepository.restoreLayout(originalLayout) }
@@ -228,21 +249,23 @@ class SettingsViewModel @Inject constructor(
                     refreshProfiles()
                 }
             } }
+          } finally {
+            creationInFlight.set(false)
+          }
         }
     }
 
     /**
      * The first-time home layout for a workspace being created, from the live settings (grid size,
-     * dock capacity, hidden apps) and the installed apps. Nothing is stored here. The app list is
+     * dock capacity) and the installed apps. Nothing is stored here. The app list is
      * already warm (a shared, replaying flow), so the timeout only covers a cold start: without
      * apps the plan is just the clock widget and the workspace is still created.
      */
     private suspend fun buildDefaultLayoutPlan(workspaceName: String): DefaultWorkspaceLayout.Plan {
         val settings = repository.settings.first()
-        val hidden = repository.hiddenApps.first()
+        // The new workspace starts with nothing hidden (see createAkProfile), so every app is a candidate.
         val apps = withTimeoutOrNull(APP_LIST_TIMEOUT_MS) { appRepository.apps.first { it.isNotEmpty() } }
             .orEmpty()
-            .filterNot { it.key in hidden }
         val dockApps = if (apps.isEmpty()) emptyList() else {
             val byKey = apps.associateBy { it.key }
             withContext(Dispatchers.IO) { resolveDefaultDockKeys(appContext, apps, settingsLast = true) }.mapNotNull { byKey[it] }
@@ -373,10 +396,10 @@ class SettingsViewModel @Inject constructor(
         ?.takeIf { it.matches(Regex("[A-Za-z0-9_-]{1,40}")) } ?: "user1"
 
     /** Persists launcher preferences and a compatibility layout snapshot for one-time migrations. */
-    private suspend fun saveProfileSnapshot(id: String, layoutOverride: List<HomeItemEntity>? = null) {
+    private suspend fun saveProfileSnapshot(id: String, layoutOverride: List<HomeItemEntity>? = null, withoutSettings: Set<String> = emptySet()) {
         val preferences = repository.exportRaw(includeLocalImages = true, includeAppUsage = true)
         val settingsJson = JSONObject()
-        preferences.forEach { (key, value) -> settingsJson.put(key, value) }
+        preferences.forEach { (key, value) -> if (key !in withoutSettings) settingsJson.put(key, value) }
         val layout = JSONArray().apply {
             (layoutOverride ?: homeLayoutRepository.snapshotLayout()).forEach { row ->
                 put(JSONObject()
@@ -723,6 +746,11 @@ private object AkProfileMutationLock {
 /** SharedPreferences key (file `ak_workspace_profiles`) of the in-flight workspace switch, see
  *  [SettingsViewModel.recoverInterruptedSwitchLocked]. */
 private const val KEY_SWITCH_JOURNAL = "switch_journal"
+
+private const val TAG = "AkWorkspace"
+
+/** True while a workspace is being created (see [SettingsViewModel.createAkProfile]). */
+private val creationInFlight = java.util.concurrent.atomic.AtomicBoolean(false)
 
 /** How long workspace creation waits for the installed-app list on a cold start. */
 private const val APP_LIST_TIMEOUT_MS = 3_000L

@@ -61,7 +61,9 @@ private fun AkProfileSwitcherScreen(
     val profiles by viewModel.profiles.collectAsStateWithLifecycle()
     // Adding a workspace clones the active one; refused (also in the ViewModel) while it is locked.
     val lockState by viewModel.lockManager.state.collectAsStateWithLifecycle()
+    val context = androidx.compose.ui.platform.LocalContext.current
     var showAdd by remember { mutableStateOf(false) }
+    var creating by remember { mutableStateOf(false) }
     var newName by remember { mutableStateOf("") }
     var removingId by remember { mutableStateOf<String?>(null) }
 
@@ -111,9 +113,14 @@ private fun AkProfileSwitcherScreen(
 
             OutlinedButton(
                 onClick = { showAdd = true },
-                enabled = profiles.size < 5 && !lockState.locked,
+                enabled = profiles.size < 5 && !lockState.locked && !creating,
                 modifier = Modifier.fillMaxWidth(),
             ) { Text("+ Add workspace") }
+            // Never leave a disabled button unexplained.
+            if (lockState.locked) Text("Unlock this workspace to add another.", style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
+            else if (profiles.size >= 5) Text("You can have up to 5 workspaces. Remove one to add another.",
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Spacer(Modifier.width(1.dp))
             Button(onClick = onDone, modifier = Modifier.fillMaxWidth()) { Text("Done") }
         }
@@ -140,8 +147,16 @@ private fun AkProfileSwitcherScreen(
                 )
             },
             confirmButton = {
-                TextButton(enabled = newName.isNotBlank(), onClick = {
-                    viewModel.createAkProfile(newName)
+                TextButton(enabled = newName.isNotBlank() && !creating, onClick = {
+                    // Closed and locked at once: a second tap must not start a second creation.
+                    creating = true
+                    val created = newName.trim()
+                    viewModel.createAkProfile(newName) { error ->
+                        creating = false
+                        android.widget.Toast.makeText(
+                            context, error ?: "Workspace \"$created\" created", android.widget.Toast.LENGTH_LONG,
+                        ).show()
+                    }
                     showAdd = false
                     newName = ""
                 }) { Text("Create") }

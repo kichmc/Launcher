@@ -296,7 +296,11 @@ class AppDrawerViewModel @Inject constructor(
         query.value = value
     }
 
-    fun hideApp(appItem: AppItem) = viewModelScope.launch { settingsRepository.setAppHidden(appItem.key, true) }
+    /** Hides [appItem] in this workspace and takes its icon off home, dock and folders too, like Hide on home. */
+    fun hideApp(appItem: AppItem) = viewModelScope.launch {
+        settingsRepository.setAppHidden(appItem.key, true)
+        homeLayoutRepository.removeAppEverywhere(appItem)
+    }
 
     fun selectTab(tab: DrawerTab) {
         selectedTabFlow.value = tab

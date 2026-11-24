@@ -920,6 +920,7 @@ fun HomeScreen(
                 onAppClick = launchApp,
                 onRenameApp = { renameTarget = it },
                 onRemoveFromFolder = { viewModel.removeFromFolder(it, openFolder.id) },
+                onHideApp = { viewModel.hideApp(it) },
                 onPinShortcut = { viewModel.pinShortcut(it) },
                 onReorder = { app, before -> viewModel.reorderInFolder(openFolder.id, app, before) },
                 onDropOnHome = { app, page, cx, cy -> viewModel.moveOutOfFolder(app, openFolder.id, page, cx, cy, defaultFolderName) },
@@ -1028,6 +1029,9 @@ fun HomeScreen(
                 ) {
                     if (menu.source == DragSource.Dock) viewModel.removeFromDock(menu.app)
                     else viewModel.removeFromHome(menu.app)
+                },
+                PopupAction(stringResource(R.string.home_hide_app), LauncherIcons.VisibilityOff) {
+                    viewModel.hideApp(menu.app)
                 },
                 PopupAction(stringResource(R.string.uninstall), LauncherIcons.Delete) { AppActions.uninstall(context, menu.app) },
             ),

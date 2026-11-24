@@ -34,14 +34,22 @@ A new workspace no longer copies the creating workspace's layout (see "Default l
 `SettingsViewModel.createAkProfile` builds the new workspace's home with `DefaultWorkspaceLayout.plan` (core/data, pure and deterministic) and stores it with `HomeLayoutRepository.initializeDefaultLayout` inside the existing switch journal. It is not a copy of the creating workspace.
 
 - **Workspace kind:** AK stores no workspace type, only a name, so `WorkspaceKind.fromName` reads it from the name typed at creation (work/office/job/business/study/school → WORK; game/gaming/play → GAMING; personal/private/family/home → PERSONAL; anything else, including the default "User N" → GENERAL). Renaming later does not regenerate the layout.
-- **Which apps:** only recognised apps. `AppCategorizer` (small ordered package table, then the app's own `ApplicationInfo.category`, then package-name hints) sorts them into categories; unknown apps stay in the drawer. Category order depends on the kind (`AppCategorizer.priority`), and inside a category the table order decides (WhatsApp before Telegram), then label and key.
-- **Where:** page 0 = clock/date widget on top, then apps row by row; at most 2 pages; every page keeps its bottom row free. Hidden apps and dock apps are excluded.
+- **Which apps:** every visible app. `AppCategorizer` (small ordered package table, then the app's own `ApplicationInfo.category`, then package-name hints) sorts them into categories; apps it does not recognise follow alphabetically. Category order depends on the kind (`AppCategorizer.priority`), and inside a category the table order decides (WhatsApp before Telegram), then label and key.
+- **Where:** page 0 = clock/date widget on top, then apps row by row; pages are filled completely, up to 4 pages (the rest stay in the drawer). Hidden apps and dock apps are excluded.
 - **Dock:** phone, messages, browser, camera, then Settings, cut to the dock's column count (`resolveDefaultDockKeys(settingsLast = true)`; first-run order is unchanged).
-- **Folders:** at most 3 (Google, Microsoft, Games, Social, Media), only with 3+ members, at most 8 apps each. Messaging and browsers are never foldered; a workspace's own focus stays loose (Games on GAMING, Microsoft on WORK). Folders use the normal folder rows, so apps can be dragged out.
+- **Folders:** at most 4 (Google, Samsung extras, Microsoft, Games, Social, Media), only with 3+ members, at most 8 apps each. Messaging and browsers are never foldered; a workspace's own focus stays loose (Games on GAMING, Microsoft on WORK). Folders use the normal folder rows, so apps can be dragged out.
 - **Once only:** `initializeDefaultLayout` refuses unless the new partition is empty and is called only from workspace creation. It is one Room transaction; failure rolls back through the switch journal.
 - **Not touched:** later installs and uninstalls (existing behaviour), widgets other than the built-in clock, existing workspaces.
 
 Pre-v9 workspaces opened for the first time after upgrade still import their saved snapshot as before.
+
+## Hidden apps are per workspace
+
+The hidden-app list is the `hidden_apps` setting. Workspace settings are saved per workspace id (`snapshot_<id>`) and swapped on every switch (`importRaw` clears, then restores the target's keys), so each workspace has its own list and a workspace with none comes back empty. A new workspace starts with nothing hidden (its snapshot omits the key and the live list is cleared once it is active), so it never inherits the creating workspace's list.
+
+- Hide: long-press an app on home, in the dock or in a folder, or in the app drawer. Only the flag changes; `HomeViewModel.uiState` leaves hidden apps out of home, the dock and folders, keeping their rows, so unhiding puts an icon back where it was. Other workspaces are untouched.
+- Unhide: Settings → Hidden apps (shows the current workspace's list).
+- Creating a workspace is one-at-a-time process-wide, tells the user why when it cannot happen (locked, 5 maximum, an error), and a failure while building or storing the default layout still creates the workspace with an empty home.
 
 ## Platform boundary
 

@@ -903,11 +903,16 @@ fun SettingsScreen(
                             }
                         }
                     }
+                    val toastContext = LocalContext.current
                     TextButton(
                         enabled = akProfiles.size < 5,
-                        onClick = { viewModel.createAkProfile("User ${akProfiles.size + 1}") },
+                        onClick = {
+                            viewModel.createAkProfile("User ${akProfiles.size + 1}") { error ->
+                                if (error != null) android.widget.Toast.makeText(toastContext, error, android.widget.Toast.LENGTH_LONG).show()
+                            }
+                        },
                     ) { Text("+ Add workspace") }
-                    Text("Each workspace keeps its own launcher settings, home layout, apps, folders, dock and wallpaper. New workspaces copy app and folder placement; widgets must be added separately.", style = MaterialTheme.typography.bodySmall)
+                    Text("Each workspace keeps its own launcher settings, home layout, apps, folders, dock and wallpaper. New workspaces start with a default layout (clock, dock and apps); other widgets must be added separately.", style = MaterialTheme.typography.bodySmall)
                 }
             },
             confirmButton = { TextButton(onClick = { showAkProfiles = false }) { Text("Done") } },

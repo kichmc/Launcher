@@ -193,6 +193,19 @@ class HomeLayoutRepository @Inject constructor(
         dao.deleteByKey(HOME, appItem.packageName, appItem.className, appItem.userSerial)
     }
 
+    /**
+     * Takes [app] off this workspace's home, dock and folders (used when it is hidden). Other
+     * workspaces are not touched: each has its own rows. Folders left with fewer than two apps
+     * dissolve and the dock is renumbered, exactly as with a manual removal.
+     */
+    suspend fun removeAppEverywhere(app: AppItem): Int = db.withTransaction {
+        val all = dao.getAll()
+        val doomed = all.filter {
+            it.isApp && it.packageName == app.packageName && it.className == app.className && it.userSerial == app.userSerial
+        }.mapTo(HashSet()) { it.id }
+        deleteAndRepairFolders(all, doomed)
+    }
+
     /** Moves/swaps a folder (or any home row, by id) to a target home cell. */
     suspend fun moveFolder(folderId: Long, page: Int, cellX: Int, cellY: Int): Boolean =
         db.withTransaction {
