@@ -26,14 +26,13 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import com.kich.launcher.data.AppRepository
 import com.kich.launcher.data.CustomIconStore
 import com.kich.launcher.data.DefaultWorkspaceLayout
-import com.kich.launcher.data.WorkspaceKind
-import com.kich.launcher.data.resolveDefaultDockKeys
+import com.kich.launcher.data.WorkspaceInitStore
+import com.kich.launcher.data.buildDefaultLayoutPlan
 import com.kich.launcher.data.DrawerFolder
 import com.kich.launcher.data.HomeLayoutRepository
 import com.kich.launcher.data.IconPackInfo
@@ -136,7 +135,8 @@ class SettingsViewModel @Inject constructor(
             }
             if (target != active && target.matches(Regex("[A-Za-z0-9_-]{1,40}")) && _profiles.value.none { it.id == target }) {
                 homeLayoutRepository.deleteWorkspace(target)
-                profilePrefs.edit().remove("snapshot_$target").remove("layout_partitioned_$target").commit()
+                profilePrefs.edit().remove("snapshot_$target").remove("layout_partitioned_$target")
+                    .remove(WorkspaceInitStore.sourceKey(target)).remove(WorkspaceInitStore.noteKey(target)).commit()
             }
         }
         profilePrefs.edit().remove(KEY_SWITCH_JOURNAL).commit()
@@ -195,7 +195,7 @@ class SettingsViewModel @Inject constructor(
 
                 // Built before the journal opens: a failure here leaves nothing half-switched.
                 // A planner failure must never stop the workspace from being created: fall back to an empty home.
-                val defaultLayout = runCatching { buildDefaultLayoutPlan(clean) }
+                val defaultLayout = runCatching { buildDefaultLayoutPlan(appContext, appRepository, repository, clean) }
                     .onFailure { android.util.Log.e(TAG, "Default layout planning failed", it) }
                     .getOrDefault(DefaultWorkspaceLayout.Plan(emptyList(), emptyList(), emptyList()))
                 val id = "ak_" + java.util.UUID.randomUUID().toString().take(8)
@@ -221,7 +221,9 @@ class SettingsViewModel @Inject constructor(
                             "New AK workspace partition was not empty"
                         }
                     }
-                    profilePrefs.edit().putBoolean("layout_partitioned_$id", true).commit()
+                    profilePrefs.edit().putBoolean("layout_partitioned_$id", true)
+                        .putString(WorkspaceInitStore.sourceKey(id), WorkspaceInitStore.GENERATED)
+                        .putString(WorkspaceInitStore.noteKey(id), "new workspace: default layout").commit()
                     val updated = _profiles.value.map { it.copy(active = false) } +
                         AkWorkspaceProfile(id, clean, true)
                     saveProfileList(updated)
@@ -243,7 +245,8 @@ class SettingsViewModel @Inject constructor(
                     runCatching { homeLayoutRepository.deleteWorkspace(id) }
                     runCatching { homeLayoutRepository.restoreLayout(originalLayout) }
                     profilePrefs.edit().putString("active", oldId)
-                        .remove("layout_partitioned_$id").remove("snapshot_$id").remove(KEY_SWITCH_JOURNAL).commit()
+                        .remove("layout_partitioned_$id").remove("snapshot_$id").remove(KEY_SWITCH_JOURNAL)
+                        .remove(WorkspaceInitStore.sourceKey(id)).remove(WorkspaceInitStore.noteKey(id)).commit()
                     // The list may already hold the new entry (the failure can come after it was saved).
                     saveProfileList(_profiles.value.filterNot { it.id == id })
                     refreshProfiles()
@@ -253,40 +256,6 @@ class SettingsViewModel @Inject constructor(
             creationInFlight.set(false)
           }
         }
-    }
-
-    /**
-     * The first-time home layout for a workspace being created, from the live settings (grid size,
-     * dock capacity) and the installed apps. Nothing is stored here. The app list is
-     * already warm (a shared, replaying flow), so the timeout only covers a cold start: without
-     * apps the plan is just the clock widget and the workspace is still created.
-     */
-    private suspend fun buildDefaultLayoutPlan(workspaceName: String): DefaultWorkspaceLayout.Plan {
-        val settings = repository.settings.first()
-        // The new workspace starts with nothing hidden (see createAkProfile), so every app is a candidate.
-        val apps = withTimeoutOrNull(APP_LIST_TIMEOUT_MS) { appRepository.apps.first { it.isNotEmpty() } }
-            .orEmpty()
-        val dockApps = if (apps.isEmpty()) emptyList() else {
-            val byKey = apps.associateBy { it.key }
-            withContext(Dispatchers.IO) { resolveDefaultDockKeys(appContext, apps, settingsLast = true) }.mapNotNull { byKey[it] }
-        }
-        // The category each app declares about itself (games, audio, social…); -1 when it declares none.
-        val systemCategories = withContext(Dispatchers.IO) {
-            val pm = appContext.packageManager
-            apps.associate { a ->
-                a.key to (runCatching { pm.getApplicationInfo(a.packageName, 0).category }.getOrDefault(-1))
-            }
-        }
-        return DefaultWorkspaceLayout.plan(
-            apps = apps,
-            dockApps = dockApps,
-            columns = settings.homeColumns,
-            rows = settings.homeRows,
-            dockColumns = settings.dockColumns,
-            smartspaceSpanY = DefaultWorkspaceLayout.SMARTSPACE_SPAN_Y,
-            kind = WorkspaceKind.fromName(workspaceName),
-            systemCategories = systemCategories,
-        )
     }
 
     fun renameAkProfile(id: String, name: String) {
@@ -477,7 +446,8 @@ class SettingsViewModel @Inject constructor(
                 // Free the deleted workspace's widgets in the AppWidgetHost now (only its own ids), instead
                 // of leaving them allocated until the next launcher start's sweep.
                 freeWidgetHostIds(homeLayoutRepository.deleteWorkspace(id))
-                profilePrefs.edit().remove("snapshot_$id").remove("layout_partitioned_$id").apply()
+                profilePrefs.edit().remove("snapshot_$id").remove("layout_partitioned_$id")
+                .remove(WorkspaceInitStore.sourceKey(id)).remove(WorkspaceInitStore.noteKey(id)).apply()
                 // Remove files owned only by the deleted virtual workspace. User 1 is protected
                 // above and its legacy drawer-wallpaper directory is never touched here.
                 File(appContext.filesDir, "wallpaper_selected_$id.jpg").delete()
@@ -752,6 +722,4 @@ private const val TAG = "AkWorkspace"
 /** True while a workspace is being created (see [SettingsViewModel.createAkProfile]). */
 private val creationInFlight = java.util.concurrent.atomic.AtomicBoolean(false)
 
-/** How long workspace creation waits for the installed-app list on a cold start. */
-private const val APP_LIST_TIMEOUT_MS = 3_000L
 

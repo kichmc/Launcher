@@ -43,6 +43,16 @@ A new workspace no longer copies the creating workspace's layout (see "Default l
 
 Pre-v9 workspaces opened for the first time after upgrade still import their saved snapshot as before.
 
+## First workspace and importing the phone's other launcher
+
+The first workspace of a fresh install is initialised like a new one (`initializeFirstWorkspaceLayout`, called from the first-run block of `HomeViewModel`, which runs once: `default_layout_seeded` + `first_run_fresh`; existing users are never touched).
+
+1. **Ask the other launcher.** `ExistingLauncherImport` uses the one route Android documents ("Import and export home screen data", source.android.com): `contentResolver.call(content://<launcher package>.settings, "EXPORT_LAYOUT_XML")` on each other home app. It works only for a launcher that implements that API and lets AK use it (Android enforces the provider's permission). AK reads no other app's files or database. Any refusal, timeout (4 s) or missing provider is a normal outcome with a recorded reason.
+2. **If it answered**, `ExistingLauncherLayout` parses the XML (size limit, no DOCTYPE) and fits it into AK's grid: pages follow the export's screens, entries keep their cell when it exists and is free and otherwise move to the next free cell, folders keep their grouping (a folder left with one app becomes an icon), the hotseat becomes the dock, apps not installed here are skipped, and an app is placed once. Widgets and other shortcuts are not imported. No clock widget is added.
+3. **Otherwise** AK generates its own layout, the same one new workspaces get (see above).
+
+`WorkspaceInitStore` records, in the workspace SharedPreferences (`layout_init_<id>`, `layout_init_note_<id>`), whether a workspace's first layout was `imported` or `generated` and why an import did not happen. The layout itself (order, pages, dock, folders) is the workspace's normal Room rows. A workspace with no record existed before this and is never regenerated. New workspaces never import and never copy another workspace.
+
 ## Hidden apps are per workspace
 
 The hidden-app list is the `hidden_apps` setting. Workspace settings are saved per workspace id (`snapshot_<id>`) and swapped on every switch (`importRaw` clears, then restores the target's keys), so each workspace has its own list and a workspace with none comes back empty. A new workspace starts with nothing hidden (its snapshot omits the key and the live list is cleared once it is active), so it never inherits the creating workspace's list.

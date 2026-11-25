@@ -4,6 +4,8 @@
 
     <!-- Open the notification shade with a swipe-down gesture. -->
     <uses-permission android:name="android.permission.SET_WALLPAPER" />
+    <!-- Read access to another launcher's documented layout-export provider (AOSP name). Granted only if that launcher defines and allows it. -->
+    <uses-permission android:name="com.android.launcher.permission.READ_SETTINGS" />
 
     <!-- AK profile lock: fingerprint through the platform BiometricPrompt. Normal permission. AK never
          requests a device PIN/credential and never touches Android's own lock screen. -->
@@ -55,6 +57,13 @@
         <intent>
             <action android:name="android.intent.action.MAIN" />
             <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
+        <!-- The phone's other home apps, so first-run setup can ask one for its layout through the
+             documented Launcher3 provider API (see ExistingLauncherImport); it works only where that
+             launcher offers it and Android allows it. -->
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.HOME" />
         </intent>
         <!-- The clock app behind the smartspace clock tap, for the fallback when SHOW_ALARMS is refused. -->
         <intent>

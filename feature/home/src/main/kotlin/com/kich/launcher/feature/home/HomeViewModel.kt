@@ -29,7 +29,8 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import com.kich.launcher.data.AppRepository
-import com.kich.launcher.data.resolveDefaultDockKeys
+import com.kich.launcher.data.WorkspaceInitStore
+import com.kich.launcher.data.initializeFirstWorkspaceLayout
 import com.kich.launcher.data.CustomIconStore
 import com.kich.launcher.data.FolderIconKey
 import com.kich.launcher.data.ShortcutIconKey
@@ -271,27 +272,11 @@ class HomeViewModel @Inject constructor(
             }
             if (!seeded) {
                 if (fresh) {
-                    val settings = settingsRepository.settings.first()
-                    // Idempotent on a retry: the widget only while home is still empty, the dock
-                    // only while the favorites are still empty.
-                    if (homeLayoutRepository.isHomeEmpty()) {
-                        // Full width so the centered clock sits in the middle of the screen.
-                        homeLayoutRepository.addBuiltin(
-                            HomeItemEntity.BUILTIN_SMARTSPACE,
-                            settings.homeColumns, SMARTSPACE_DEFAULT_SPAN_Y, settings.homeColumns, settings.homeRows,
-                        )
-                    }
-                    // The app list needs a beat on a cold start; a fresh device always has apps.
-                    val apps = appRepository.apps.first { it.isNotEmpty() }
-                    val dockKeys = resolveDefaultDockKeys(context, apps)
-                    if (dockKeys.isNotEmpty() && homeLayoutRepository.isDockEmpty()) {
-                        val byKey = apps.associateBy { it.key }
-                        homeLayoutRepository.seedDock(dockKeys.mapNotNull { byKey[it] })
-                        // The seed is 5 apps but the dock defaults to 4 columns — widen to fit.
-                        if (dockKeys.size > settings.dockColumns) {
-                            settingsRepository.setDockColumns(dockKeys.size)
-                        }
-                    }
+                    // The first workspace is initialised like a new one: the phone's other launcher is asked for
+                    // its layout first (used only if it really answers), otherwise AK generates one. Retry-safe:
+                    // nothing is written unless home is still empty, so a death mid-way cannot double it.
+                    val done = initializeFirstWorkspaceLayout(context, appRepository, settingsRepository, homeLayoutRepository)
+                    if (done != null) WorkspaceInitStore.record(context, WorkspaceInitStore.activeId(context), done.first, done.second)
                 }
                 settingsRepository.setDefaultLayoutSeeded()
             }
